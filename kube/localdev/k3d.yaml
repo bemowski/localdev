@@ -1,0 +1,22 @@
+# k3d cluster config — used by `mise run create`
+# The manifests/ volume is passed on the command line (needs an absolute path).
+apiVersion: k3d.io/v1alpha5
+kind: Simple
+metadata:
+  name: localdev
+servers: 1
+agents: 0
+image: rancher/k3s:v1.36.5-k3s1   # k3s stable channel
+ports:
+  - port: 80:80
+    nodeFilters:
+      - loadbalancer
+registries:
+  create:
+    name: localdev-registry
+    host: "0.0.0.0"
+    hostPort: "5005"
+options:
+  kubeconfig:
+    updateDefaultKubeconfig: false
+    switchCurrentContext: false

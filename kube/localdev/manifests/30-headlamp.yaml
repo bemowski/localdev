@@ -1,0 +1,47 @@
+# Headlamp at /headlamp, behind SSO. No token needed (uses its own SA).
+apiVersion: helm.cattle.io/v1
+kind: HelmChart
+metadata:
+  name: headlamp
+  namespace: kube-system
+spec:
+  repo: https://kubernetes-sigs.github.io/headlamp/
+  chart: headlamp
+  version: 0.45.0
+  targetNamespace: headlamp
+  valuesContent: |-
+    fullnameOverride: headlamp
+    config:
+      baseURL: /headlamp
+      # No token login: every user acts as the chart's SA (cluster-admin).
+      # Only acceptable because the ingress is behind oauth2-proxy + allow-list.
+      unsafeUseServiceAccountToken: true
+---
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  name: sso
+  namespace: headlamp
+spec:
+  forwardAuth:
+    address: http://oauth2-proxy.auth.svc.cluster.local/oauth2/auth?allowed_emails=bemowski@gmail.com
+    authResponseHeaders: [X-Auth-Request-Email, X-Auth-Request-User]
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: headlamp
+  namespace: headlamp
+  annotations:
+    traefik.ingress.kubernetes.io/router.middlewares: auth-auth-errors@kubernetescrd,headlamp-sso@kubernetescrd
+spec:
+  rules:
+    - http:
+        paths:
+          - path: /headlamp
+            pathType: Prefix
+            backend:
+              service:
+                name: headlamp
+                port:
+                  number: 80

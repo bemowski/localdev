@@ -1,0 +1,59 @@
+# oauth2-proxy (Google) — one proxy, per-app allow-lists via forwardAuth ?allowed_emails=
+# Secret auth/oauth2-proxy (client-id, client-secret, cookie-secret) is created by `mise run create`.
+apiVersion: helm.cattle.io/v1
+kind: HelmChart
+metadata:
+  name: oauth2-proxy
+  namespace: kube-system
+spec:
+  repo: https://oauth2-proxy.github.io/manifests
+  chart: oauth2-proxy
+  version: 10.7.1
+  targetNamespace: auth
+  valuesContent: |-
+    config:
+      existingSecret: oauth2-proxy
+      emailDomains: ["*"]          # narrowed per app by allowed_emails
+      upstreams: ["static://202"]
+    extraArgs:
+      provider: google
+      redirect-url: http://localhost/oauth2/callback
+      reverse-proxy: true
+      cookie-secure: false
+      set-xauthrequest: true
+      skip-provider-button: true
+      whitelist-domain: localhost
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: oauth2-proxy
+  namespace: auth
+spec:
+  rules:
+    - http:
+        paths:
+          - path: /oauth2
+            pathType: Prefix
+            backend:
+              service:
+                name: oauth2-proxy
+                port:
+                  number: 80
+---
+# Shared: turn a forwardAuth 401 into a redirect to the Google sign-in.
+# Must come BEFORE the app's forwardAuth middleware in the chain.
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  name: auth-errors
+  namespace: auth
+spec:
+  errors:
+    status: ["401"]
+    statusRewrites:
+      "401": 302      # oauth2-proxy sets Location; without this browsers see a bare 401
+    service:
+      name: oauth2-proxy
+      port: 80
+    query: /oauth2/sign_in?rd={url}

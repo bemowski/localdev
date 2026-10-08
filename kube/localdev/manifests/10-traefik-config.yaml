@@ -1,0 +1,11 @@
+# Customize the k3s-bundled traefik
+apiVersion: helm.cattle.io/v1
+kind: HelmChartConfig
+metadata:
+  name: traefik
+  namespace: kube-system
+spec:
+  valuesContent: |-
+    providers:
+      kubernetesCRD:
+        allowCrossNamespace: true

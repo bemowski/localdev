@@ -1,0 +1,65 @@
+# kube/localdev — ephemeral local kubernetes (k3d)
+#   mise run create | status | destroy | recreate
+#   see readme.md
+
+[tools]
+k3d = '5.9.0'
+kubectl = '1.37.1'   # overrides root 1.27
+helm = '4.3.0'
+k9s = '0.51.0'
+
+[env]
+CLUSTER_NAME = "localdev"
+KUBECONFIG = "{{config_root}}/.kubeconfig"   # never touch ~/.kube/config
+
+[tasks.create]
+description = "Create the localdev k3d cluster and bootstrap secrets"
+run = """#!/bin/bash
+set -euo pipefail
+
+if [ ! -s secrets.env ]; then
+    mise run decrypt "{{config_root}}/secrets.env.asc"
+fi
+set -a; source secrets.env; set +a
+for v in GOOGLE_CLIENT_ID GOOGLE_CLIENT_SECRET COOKIE_SECRET; do
+    [ -n "${!v:-}" ] || { echo "ERROR: $v missing from secrets.env (see readme.md)" >&2; exit 1; }
+done
+
+k3d cluster create --config k3d.yaml \
+    --volume "{{config_root}}/manifests:/var/lib/rancher/k3s/server/manifests/localdev@server:0"
+
+k3d kubeconfig get "$CLUSTER_NAME" > "$KUBECONFIG"
+chmod 600 "$KUBECONFIG"
+
+kubectl create namespace auth --dry-run=client -o yaml | kubectl apply -f -
+kubectl -n auth create secret generic oauth2-proxy \
+    --from-literal=client-id="$GOOGLE_CLIENT_ID" \
+    --from-literal=client-secret="$GOOGLE_CLIENT_SECRET" \
+    --from-literal=cookie-secret="$COOKIE_SECRET" \
+    --dry-run=client -o yaml | kubectl apply -f -
+
+echo "Waiting for traefik..."
+until kubectl -n kube-system get deploy traefik >/dev/null 2>&1; do sleep 2; done
+kubectl -n kube-system rollout status deploy/traefik --timeout=180s
+"""
+
+[tasks.destroy]
+description = "Delete the localdev cluster and its kubeconfig"
+run = """#!/bin/bash
+k3d cluster delete "$CLUSTER_NAME"
+rm -f "$KUBECONFIG"
+"""
+
+[tasks.recreate]
+description = "Destroy then create"
+run = ["mise run destroy", "mise run create"]
+
+[tasks.status]
+description = "Show cluster, nodes, helm install jobs and ingresses"
+run = """#!/bin/bash
+k3d cluster list
+kubectl get nodes -o wide
+kubectl get helmcharts -A
+kubectl get jobs -A -l helmcharts.helm.cattle.io/chart
+kubectl get ingress,ingressroutes -A 2>/dev/null
+"""
