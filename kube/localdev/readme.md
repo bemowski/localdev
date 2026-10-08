@@ -66,7 +66,8 @@ Each `apps/<name>/` directory holds a Dockerfile. `mise run build <name>` builds
     - **Amber:** partially ready, a rollout in progress, starting up (under 2 minutes), restarted in the last 10 minutes, Helm still installing, or scaled to 0.
     - **Red:** no ready replicas, CrashLoopBackOff, an image pull error, a config error, stuck Pending (over 2 minutes), a failed Helm install, or the workload not found. The reason is shown under the row.
   - **Editing:** both files live in the `cnav-config` ConfigMap. Edit them there and the page picks up the change within about a minute, with no rebuild. The copies in `apps/cnav/` are only defaults for running the image on its own, where the status column shows "unavailable".
-  - **Access:** the `cnav-status` ClusterRole gives read-only access to workloads, pods, jobs and HelmCharts.
+  - **Memory:** working-set memory from metrics-server, summed per row, per group (in the group header) and for the cluster (beside the "Status" title). Hover a row to see its own figure. Only workloads listed in `status.yaml` are counted.
+  - **Access:** the `cnav-status` ClusterRole gives read-only access to workloads, pods, jobs, HelmCharts and pod metrics.
 
 ## Google OAuth client (one-time setup)
 

@@ -74,8 +74,30 @@ def ago(seconds):
     return f"{int(seconds // 60)}m ago" if seconds >= 60 else f"{int(seconds)}s ago"
 
 
-def result(state, reason="", ready=None, desired=None):
-    return {"state": state, "reason": reason, "ready": ready, "desired": desired}
+def result(state, reason="", ready=None, desired=None, mem=None):
+    return {"state": state, "reason": reason, "ready": ready, "desired": desired, "mem": mem}
+
+
+UNITS = {"Ki": 2**10, "Mi": 2**20, "Gi": 2**30, "Ti": 2**40, "k": 10**3, "M": 10**6, "G": 10**9, "T": 10**12}
+
+
+def quantity_bytes(q):
+    """Parse a k8s memory quantity ('1592Ki', '34Mi', '123456') to bytes."""
+    for suffix in sorted(UNITS, key=len, reverse=True):
+        if q.endswith(suffix):
+            return int(float(q[: -len(suffix)]) * UNITS[suffix])
+    return int(float(q))
+
+
+def pods_memory(kube, ns, selector):
+    """Working-set memory of matching pods from metrics-server; None if unavailable."""
+    try:
+        m = kube.get(f"/apis/metrics.k8s.io/v1beta1/namespaces/{ns}/pods", labelSelector=selector)
+    except Exception:
+        return None
+    if not m:
+        return None
+    return sum(quantity_bytes(c["usage"]["memory"]) for p in m.get("items", []) for c in p.get("containers", []))
 
 
 # --- checks -----------------------------------------------------------------
@@ -133,17 +155,18 @@ def check_workload(kube, kind, ns, name):
     pods = (kube.get(f"/api/v1/namespaces/{ns}/pods", labelSelector=selector) or {}).get("items", [])
     problems = [p for p in (pod_problem(p) for p in pods) if p]
     worst = max(problems, key=lambda p: RANK[p[0]], default=None)
+    mem = pods_memory(kube, ns, selector)
 
     if ready == 0:
         if worst and worst[0] == "amber" and worst[1].startswith("starting"):
-            return result("amber", worst[1], ready, desired)
-        return result("red", worst[1] if worst else "no ready pods", ready, desired)
+            return result("amber", worst[1], ready, desired, mem)
+        return result("red", worst[1] if worst else "no ready pods", ready, desired, mem)
     if ready < desired:
         why = f"{ready}/{desired} ready" + (f": {worst[1]}" if worst else "")
-        return result("amber", why, ready, desired)
+        return result("amber", why, ready, desired, mem)
     if worst:  # all ready, but something flapped recently
-        return result("amber", worst[1], ready, desired)
-    return result("green", "", ready, desired)
+        return result("amber", worst[1], ready, desired, mem)
+    return result("green", "", ready, desired, mem)
 
 
 def check_helmchart(kube, name, ns="kube-system"):
@@ -183,12 +206,14 @@ def evaluate_item(kube, item):
 
     worst = max(results, key=lambda r: RANK[r["state"]], default=result("amber", "no checks"))
     counted = [r for r in results if r["desired"] is not None]
+    mems = [r["mem"] for r in results if r["mem"] is not None]
     return {
         "name": item.get("name", "?"),
         "state": worst["state"],
         "reason": worst["reason"],
         "ready": sum(r["ready"] for r in counted) if counted else None,
         "desired": sum(r["desired"] for r in counted) if counted else None,
+        "mem": sum(mems) if mems else None,
         "link": item.get("link", link),
     }
 
@@ -200,8 +225,13 @@ def status():
     for g in config:
         items = [evaluate_item(kube, i) for i in g.get("items", [])]
         state = max((i["state"] for i in items), key=RANK.get, default="green")
-        groups.append({"group": g.get("group", "?"), "state": state, "items": items})
-    return {"updated": datetime.now(timezone.utc).isoformat(timespec="seconds"), "groups": groups}
+        mem = sum(i["mem"] for i in items if i["mem"] is not None)
+        groups.append({"group": g.get("group", "?"), "state": state, "mem": mem, "items": items})
+    return {
+        "updated": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        "mem": sum(g["mem"] for g in groups),
+        "groups": groups,
+    }
 
 
 # --- http -------------------------------------------------------------------

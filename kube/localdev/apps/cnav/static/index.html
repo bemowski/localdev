@@ -89,26 +89,45 @@
     overflow-y: auto;
     padding: 40px 20px 24px;
   }
-  aside h2 { font-size: 16px; margin: 0 0 4px; }
+  .status-head { display: flex; align-items: baseline; justify-content: space-between; margin-bottom: 2px; }
+  aside h2 { font-size: 16px; margin: 0; }
+  .total { font: 600 13px ui-monospace, SFMono-Regular, Menlo, monospace; }
+  .total-label { color: var(--muted); font: 12px system-ui, sans-serif; margin-right: 4px; }
   .updated { color: var(--muted); font-size: 12px; margin-bottom: 18px; }
-  .group { margin-bottom: 20px; }
+
+  .group {
+    margin-bottom: 14px;
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-left: 4px solid var(--muted);
+    border-radius: 10px;
+    box-shadow: var(--shadow);
+    overflow: hidden;
+  }
+  .group.green { border-left-color: var(--green); }
+  .group.amber { border-left-color: var(--amber); }
+  .group.red { border-left-color: var(--red); }
   .group-head {
     display: flex; align-items: center; gap: 8px;
-    font-size: 12px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase;
-    color: var(--muted); padding-bottom: 6px; border-bottom: 1px solid var(--border); margin-bottom: 4px;
+    padding: 9px 12px;
+    background: color-mix(in srgb, var(--panel) 60%, var(--card));
+    border-bottom: 1px solid var(--border);
   }
-  a.row {
+  .group-name { font-size: 13px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; }
+  .group-count { color: var(--muted); font-size: 12px; }
+  .group-mem { margin-left: auto; font: 600 12px ui-monospace, SFMono-Regular, Menlo, monospace; }
+  .rows { padding: 4px 4px; }
+  a.row, div.row {
     display: grid;
     grid-template-columns: 12px 1fr auto;
     column-gap: 10px;
     align-items: center;
-    padding: 7px 8px;
-    margin: 0 -8px;
+    padding: 6px 8px;
     border-radius: 6px;
     color: inherit;
     text-decoration: none;
   }
-  a.row:hover { background: var(--card); }
+  a.row:hover { background: var(--panel); }
   .row-name { font-size: 14px; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .count { color: var(--muted); font: 12px ui-monospace, SFMono-Regular, Menlo, monospace; }
   .reason { grid-column: 2 / 4; font-size: 12px; color: var(--muted); line-height: 1.35; }
@@ -135,7 +154,10 @@
     <div class="grid" id="grid"></div>
   </main>
   <aside>
-    <h2>Status</h2>
+    <div class="status-head">
+      <h2>Status</h2>
+      <span class="total" id="total"></span>
+    </div>
     <div class="updated" id="updated">loading…</div>
     <div id="status"></div>
   </aside>
@@ -176,22 +198,35 @@
     .catch(err => document.getElementById('grid').replaceWith(el('div', 'error', String(err))));
 
   // --- status ---
+  function fmtMem(bytes) {
+    if (bytes == null) return '';
+    const mi = bytes / 2 ** 20;
+    return mi >= 1024 ? `${(mi / 1024).toFixed(2)} GiB` : `${Math.round(mi)} MiB`;
+  }
+
   function renderStatus(data) {
     const box = document.getElementById('status');
     box.replaceChildren();
+    const total = document.getElementById('total');
+    total.replaceChildren(el('span', 'total-label', 'memory'), document.createTextNode(fmtMem(data.mem)));
     for (const g of data.groups) {
-      const group = el('section', 'group');
+      const group = el('section', `group ${g.state}`);
       const head = el('div', 'group-head');
-      head.append(el('span', `dot ${g.state}`), el('span', null, g.group));
-      group.append(head);
+      head.append(el('span', `dot ${g.state}`), el('span', 'group-name', g.group),
+                  el('span', 'group-count', `${g.items.length}`), el('span', 'group-mem', fmtMem(g.mem)));
+      head.title = `${g.group}: ${fmtMem(g.mem)} working-set memory across ${g.items.length} items`;
+      const rows = el('div', 'rows');
       for (const i of g.items) {
         const row = el(i.link ? 'a' : 'div', 'row');
-        if (i.link) { row.href = i.link; row.title = `Open ${i.name} in Headlamp`; }
+        if (i.link) row.href = i.link;
+        row.title = [i.link && `Open ${i.name} in Headlamp`, i.mem != null && `memory ${fmtMem(i.mem)}`]
+          .filter(Boolean).join(' · ');
         row.append(el('span', `dot ${i.state}`), el('span', 'row-name', i.name),
                    el('span', 'count', i.desired != null ? `${i.ready}/${i.desired}` : ''));
         if (i.state !== 'green' && i.reason) row.append(el('div', `reason ${i.state}`, i.reason));
-        group.append(row);
+        rows.append(row);
       }
+      group.append(head, rows);
       box.append(group);
     }
     const t = new Date(data.updated);

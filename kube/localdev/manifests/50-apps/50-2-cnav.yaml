@@ -111,6 +111,9 @@ rules:
   - apiGroups: ["helm.cattle.io"]
     resources: [helmcharts]
     verbs: [get]
+  - apiGroups: ["metrics.k8s.io"]     # memory rollups (metrics-server)
+    resources: [pods]
+    verbs: [get, list]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
