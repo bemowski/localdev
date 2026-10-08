@@ -1,5 +1,5 @@
 # kube/localdev — ephemeral local kubernetes (k3d)
-#   mise run create | status | destroy | recreate
+#   mise run create | status | destroy | recreate | build <app>
 #   see readme.md
 
 [tools]
@@ -41,6 +41,27 @@ kubectl -n auth create secret generic oauth2-proxy \
 echo "Waiting for traefik..."
 until kubectl -n kube-system get deploy traefik >/dev/null 2>&1; do sleep 2; done
 kubectl -n kube-system rollout status deploy/traefik --timeout=180s
+
+for app in apps/*/; do mise run build "$(basename "$app")"; done
+"""
+
+[tasks.build]
+description = "Build apps/<app>, push to the local registry, restart its deployment"
+usage = 'arg "<app>" help="directory under apps/"'
+run = """#!/bin/bash
+set -euo pipefail
+app="$usage_app"
+image="localhost:5005/$app:latest"       # pulled in-cluster as localdev-registry:5005/$app
+
+docker build -t "$image" "apps/$app"
+docker push "$image"
+
+# restart any deployment labelled app=<app> so it pulls the new :latest
+kubectl get deploy -A -l app="$app" -o jsonpath='{range .items[*]}{.metadata.namespace}{"\\n"}{end}' |
+while read -r ns; do
+    kubectl -n "$ns" rollout restart deploy -l app="$app"
+    kubectl -n "$ns" rollout status deploy -l app="$app" --timeout=120s
+done
 """
 
 [tasks.destroy]

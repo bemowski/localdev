@@ -4,6 +4,7 @@ Ephemeral local Kubernetes (k3d) with path-based routing on `http://localhost/<a
 
 | path | app |
 |---|---|
+| `/` | Cluster navigator (cnav): cards linking to the apps below. It's also the catch-all, so unknown paths land here. |
 | `/whoami` | SSO test app. It echoes the request headers, including `X-Auth-Request-Email`. |
 | `/headlamp` | Kubernetes UI. No token login: Headlamp acts as its own cluster-admin account, so the SSO allow-list is the only gate. |
 | `/grafana` | Grafana. You're signed in from the SSO email header, as an org Admin. |
@@ -27,16 +28,36 @@ mise run create      # create cluster, write .kubeconfig, load secrets, wait for
 mise run status      # nodes, helm install jobs, ingresses
 mise run destroy     # delete cluster + .kubeconfig
 mise run recreate
+mise run build cnav  # rebuild apps/cnav, push to the local registry, restart it
 k9s                  # uses ./.kubeconfig via mise env; ~/.kube/config is never touched
 ```
 
 `manifests/` is mounted live into k3s's auto-deploy directory, so saving a file there re-applies it within seconds.
+
+```
+manifests/
+  00-namespaces.yaml
+  10-platform/  10.1-traefik-config  10.2-oauth2-proxy
+  20-infra/     20.1-headlamp  20.2-monitoring  20.3-logging
+  50-apps/      50.1-whoami  50.2-cnav
+```
+- Subfolders work at any depth.
+- **Filenames must be unique across the whole tree.** k3s tracks each file by its base name only, so `infra/values.yaml` and `apps/values.yaml` would collide. Name each file `<folder number>.<n>-<name>.yaml` so names can't collide.
 - Removing an object from a file deletes it from the cluster.
 - Changing a `HelmChart`'s `valuesContent` runs a Helm upgrade.
 - **Deleting a whole file does not delete its objects.** Remove them from the file first, or `kubectl delete` them.
 - Changes to `k3d.yaml` or `secrets.env` need `mise run recreate`.
 
 **Allow-lists.** Each app has its own `sso` forwardAuth Middleware with `?allowed_emails=a@x.com,b@y.com`. Google accounts must also be listed as test users on the consent screen (below).
+
+## Apps (`apps/`)
+
+Each `apps/<name>/` directory holds a Dockerfile. `mise run build <name>` builds it as `localhost:5005/<name>:latest`, pushes it to the k3d registry and restarts any deployment labelled `app=<name>`. Inside the cluster, the image is pulled as `localdev-registry:5005/<name>:latest`. `mise run create` builds every app.
+
+- **cnav** (`apps/cnav`, deployed by `manifests/50-apps/50.2-cnav.yaml`): nginx serving a page that renders cards from `cards.yaml`.
+  - To change the cards, edit the `cnav-cards` ConfigMap in `manifests/50-apps/50.2-cnav.yaml`. The page updates within about a minute, with no rebuild.
+  - Card fields: `component`, `icon` (an emoji), `link`, and an optional `description`.
+  - The `cards.yaml` baked into the image is only the default, used when you run the image on its own.
 
 ## Google OAuth client (one-time setup)
 

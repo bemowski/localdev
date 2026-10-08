@@ -1,0 +1,13 @@
+# Cluster navigator cards. Fields: component, icon (emoji), link, description (optional)
+- component: Headlamp
+  icon: 🔦
+  link: /headlamp/
+  description: Kubernetes dashboard
+- component: Grafana
+  icon: 📊
+  link: /grafana/
+  description: Dashboards, metrics and logs
+- component: Prometheus
+  icon: 🔥
+  link: /prometheus/
+  description: Metrics and scrape targets
