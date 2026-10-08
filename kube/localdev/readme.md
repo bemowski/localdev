@@ -10,6 +10,7 @@ Ephemeral local Kubernetes (k3d) with path-based routing on `http://localhost/<a
 | `/grafana` | Grafana. You're signed in from the SSO email header, as an org Admin. |
 | `/prometheus` | Prometheus UI. Use `/prometheus/targets` for scrape health. |
 | `/alertmanager` | Alertmanager UI |
+| `/pgweb` | pgweb, a Postgres web UI locked to the `app` database |
 | `/registry` | Registry UI (joxit/docker-registry-ui), read-only, for browsing images in the k3d registry (`localhost:5005`) |
 | *(no route)* | Loki holds every pod's logs, shipped by Alloy. Query them in Grafana → Explore → Loki, e.g. `{namespace="demo", app="whoami"}`. |
 | `/oauth2/*` | oauth2-proxy sign-in and callback (`/oauth2/sign_out` to log out) |
@@ -30,6 +31,9 @@ mise run status      # nodes, helm install jobs, ingresses
 mise run destroy     # delete cluster + .kubeconfig
 mise run recreate
 mise run build cnav  # rebuild apps/cnav, push to the local registry, restart it
+mise run pg:forward  # postgres on localhost:5432 (pass a port to change it)
+mise run pg:psql     # psql shell in the postgres pod
+mise run clean       # delete runtime.data (asks first; cluster must be destroyed)
 k9s                  # uses ./.kubeconfig via mise env; ~/.kube/config is never touched
 ```
 
@@ -40,7 +44,7 @@ manifests/
   00-namespaces.yaml
   10-platform/  10-1-traefik-config  10-2-oauth2-proxy
   20-infra/     20-1-headlamp  20-2-monitoring  20-3-logging
-  30-tools/     30-1-registry-ui
+  30-tools/     30-1-registry-ui  30-2-postgres
   50-apps/      50-1-whoami  50-2-cnav
 ```
 - Subfolders work at any depth.
@@ -51,9 +55,26 @@ manifests/
 - Removing an object from a file deletes it from the cluster.
 - Changing a `HelmChart`'s `valuesContent` runs a Helm upgrade.
 - **Deleting a whole file does not delete its objects.** Remove them from the file first, or `kubectl delete` them.
-- Changes to `k3d.yaml` or `secrets.env` need `mise run recreate`.
+- Changes to `k3d.yaml` or `secrets.env` need `mise run recreate`. `runtime.data/` is kept across it.
 
 **Allow-lists.** Each app has its own `sso` forwardAuth Middleware with `?allowed_emails=a@x.com,b@y.com`. Google accounts must also be listed as test users on the consent screen (below).
+
+## Persistent data (`runtime.data/`)
+
+`runtime.data/` (gitignored) sits next to this readme and survives `destroy` and `recreate`:
+- `runtime.data/postgres`: Postgres data. It's mounted into the server node at `/runtime.data`, and the pod uses it as a hostPath.
+- `runtime.data/registry`: images in the k3d registry, so `localhost:5005` keeps them across rebuilds.
+
+`mise run clean` deletes it all. It refuses to run while the cluster exists, shows sizes, and asks you to type `clean`. Pass `--yes` to skip the prompt. The files are owned by container users (root, and postgres uid 999), so it deletes them through a throwaway container rather than `sudo`.
+
+## Postgres
+
+Postgres 18 is a single-instance StatefulSet in `tools` (`manifests/30-tools/30-2-postgres.yaml`), with no operator.
+- **Credentials** (fixed, dev only): user `app`, password `localdev`, database `app`.
+- **In-cluster connection:** host `postgres-rw.tools.svc:5432`. The Secret `postgres-app` has the keys `username`, `password`, `dbname`, `host`, `port`, `uri` and `jdbc-uri`.
+- **From your desktop:** run `mise run pg:forward`, then connect to `postgresql://app:localdev@localhost:5432/app`.
+- **Web UI:** `/pgweb/`.
+- **Later move to CloudNativePG:** the Service and Secret names match what CloudNativePG creates for a `Cluster` named `postgres`, so apps won't need changes. Data moves with `pg_dump` and `pg_restore`.
 
 ## Apps (`apps/`)
 

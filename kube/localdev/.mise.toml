@@ -1,5 +1,5 @@
 # kube/localdev — ephemeral local kubernetes (k3d)
-#   mise run create | status | destroy | recreate | build <app>
+#   mise run create | status | destroy | recreate | build <app> | clean | pg:forward | pg:psql
 #   see readme.md
 
 [tools]
@@ -11,6 +11,7 @@ k9s = '0.51.0'
 [env]
 CLUSTER_NAME = "localdev"
 KUBECONFIG = "{{config_root}}/.kubeconfig"   # never touch ~/.kube/config
+LOCALDEV_ROOT = "{{config_root}}"            # expanded in k3d.yaml (absolute host paths)
 
 [tasks.create]
 description = "Create the localdev k3d cluster and bootstrap secrets"
@@ -24,6 +25,9 @@ set -a; source secrets.env; set +a
 for v in GOOGLE_CLIENT_ID GOOGLE_CLIENT_SECRET COOKIE_SECRET; do
     [ -n "${!v:-}" ] || { echo "ERROR: $v missing from secrets.env (see readme.md)" >&2; exit 1; }
 done
+
+# persistent host data (see k3d.yaml); create as us, not as root via docker
+mkdir -p runtime.data/registry
 
 k3d cluster create --config k3d.yaml \
     --volume "{{config_root}}/manifests:/var/lib/rancher/k3s/server/manifests/localdev@server:0"
@@ -84,3 +88,44 @@ kubectl get helmcharts -A
 kubectl get jobs -A -l helmcharts.helm.cattle.io/chart
 kubectl get ingress,ingressroutes -A 2>/dev/null
 """
+
+[tasks.clean]
+description = "Delete runtime.data (postgres data, registry images). Cluster must be destroyed first."
+usage = 'flag "-y --yes" help="skip the confirmation prompt"'
+raw = true   # interactive prompt
+run = """#!/bin/bash
+set -euo pipefail
+if k3d cluster get "$CLUSTER_NAME" >/dev/null 2>&1; then
+    echo "Cluster '$CLUSTER_NAME' is running and using runtime.data. Run 'mise run destroy' first." >&2
+    exit 1
+fi
+if [ ! -d runtime.data ]; then
+    echo "Nothing to clean: runtime.data does not exist."
+    exit 0
+fi
+echo "This permanently deletes $PWD/runtime.data:"
+# sizes via docker: postgres files are uid 999 and unreadable to us
+docker run --rm -v "$PWD/runtime.data:/data:ro" alpine:3.22 sh -c 'cd /data && du -sh * 2>/dev/null' | sed 's/^/    /' || true
+if [ "${usage_yes:-false}" != "true" ]; then
+    read -r -p "Type 'clean' to confirm: " answer
+    [ "$answer" = "clean" ] || { echo "Aborted."; exit 1; }
+fi
+# contents are owned by container users (root, postgres uid 999): delete via docker, not sudo
+docker run --rm -v "$PWD/runtime.data:/data" alpine:3.22 sh -c 'rm -rf /data/* /data/.[!.]* 2>/dev/null; true'
+rmdir runtime.data
+echo "runtime.data deleted."
+"""
+
+[tasks."pg:forward"]
+description = "Port-forward postgres to localhost (default 5432)"
+usage = 'arg "[port]" default="5432"'
+raw = true
+run = """#!/bin/bash
+echo "postgresql://app:localdev@localhost:${usage_port}/app   (Ctrl-C to stop)"
+kubectl -n tools port-forward svc/postgres-rw "${usage_port}:5432"
+"""
+
+[tasks."pg:psql"]
+description = "psql shell in the postgres pod (as app, db app)"
+raw = true
+run = "kubectl -n tools exec -it statefulset/postgres -- psql -U app app"

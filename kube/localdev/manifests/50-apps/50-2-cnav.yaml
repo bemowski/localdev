@@ -24,6 +24,10 @@ data:
       icon: 📦
       link: /registry/
       description: Images in the localdev registry
+    - component: pgweb
+      icon: 🐘
+      link: /pgweb/
+      description: Postgres (tools/postgres-rw), app database
     - component: whoami
       icon: 👋
       link: /whoami
@@ -78,6 +82,12 @@ data:
         - name: Registry UI
           checks:
             - {kind: Deployment, namespace: tools, name: registry-ui}
+        - name: Postgres
+          checks:
+            - {kind: StatefulSet, namespace: tools, name: postgres}
+        - name: pgweb
+          checks:
+            - {kind: Deployment, namespace: tools, name: pgweb}
     - group: apps
       items:
         - name: whoami

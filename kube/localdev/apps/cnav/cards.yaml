@@ -15,6 +15,10 @@
   icon: 📦
   link: /registry/
   description: Images in the localdev registry
+- component: pgweb
+  icon: 🐘
+  link: /pgweb/
+  description: Postgres (tools/postgres-rw), app database
 - component: whoami
   icon: 👋
   link: /whoami
