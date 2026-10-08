@@ -45,7 +45,7 @@ spec:
         users:
           auto_assign_org_role: Admin   # the SSO allow-list is the gate
       additionalDataSources:
-        - name: Loki                    # deployed by 20.3-logging.yaml
+        - name: Loki                    # deployed by 20-3-logging.yaml
           type: loki
           uid: loki
           url: http://loki.monitoring.svc:3100

@@ -37,12 +37,15 @@ k9s                  # uses ./.kubeconfig via mise env; ~/.kube/config is never 
 ```
 manifests/
   00-namespaces.yaml
-  10-platform/  10.1-traefik-config  10.2-oauth2-proxy
-  20-infra/     20.1-headlamp  20.2-monitoring  20.3-logging
-  50-apps/      50.1-whoami  50.2-cnav
+  10-platform/  10-1-traefik-config  10-2-oauth2-proxy
+  20-infra/     20-1-headlamp  20-2-monitoring  20-3-logging
+  50-apps/      50-1-whoami  50-2-cnav
 ```
 - Subfolders work at any depth.
-- **Filenames must be unique across the whole tree.** k3s tracks each file by its base name only, so `infra/values.yaml` and `apps/values.yaml` would collide. Name each file `<folder number>.<n>-<name>.yaml` so names can't collide.
+- **Filenames must be unique across the whole tree.** k3s tracks each file as an AddOn named after the file's base name, ignoring the folder.
+  - The name is cut at the **first dot**. `10.1-a.yaml` and `10.2-b.yaml` would both become AddOn `10`, and the two files would keep deleting each other's objects.
+  - So name files `<folder number>-<n>-<name>.yaml`, with dashes and no dots before `.yaml`.
+  - After renaming a file, delete its old AddOn entry with `kubectl -n kube-system delete addon <old-name>`. That removes only the tracking entry, not the objects.
 - Removing an object from a file deletes it from the cluster.
 - Changing a `HelmChart`'s `valuesContent` runs a Helm upgrade.
 - **Deleting a whole file does not delete its objects.** Remove them from the file first, or `kubectl delete` them.
@@ -54,8 +57,8 @@ manifests/
 
 Each `apps/<name>/` directory holds a Dockerfile. `mise run build <name>` builds it as `localhost:5005/<name>:latest`, pushes it to the k3d registry and restarts any deployment labelled `app=<name>`. Inside the cluster, the image is pulled as `localdev-registry:5005/<name>:latest`. `mise run create` builds every app.
 
-- **cnav** (`apps/cnav`, deployed by `manifests/50-apps/50.2-cnav.yaml`): nginx serving a page that renders cards from `cards.yaml`.
-  - To change the cards, edit the `cnav-cards` ConfigMap in `manifests/50-apps/50.2-cnav.yaml`. The page updates within about a minute, with no rebuild.
+- **cnav** (`apps/cnav`, deployed by `manifests/50-apps/50-2-cnav.yaml`): nginx serving a page that renders cards from `cards.yaml`.
+  - To change the cards, edit the `cnav-cards` ConfigMap in `manifests/50-apps/50-2-cnav.yaml`. The page updates within about a minute, with no rebuild.
   - Card fields: `component`, `icon` (an emoji), `link`, and an optional `description`.
   - The `cards.yaml` baked into the image is only the default, used when you run the image on its own.
 
