@@ -9,6 +9,7 @@ Ephemeral local Kubernetes (k3d) with path-based routing on `http://localhost/<a
 | `/grafana` | Grafana. You're signed in from the SSO email header, as an org Admin. |
 | `/prometheus` | Prometheus UI. Use `/prometheus/targets` for scrape health. |
 | `/alertmanager` | Alertmanager UI |
+| *(no route)* | Loki holds every pod's logs, shipped by Alloy. Query them in Grafana → Explore → Loki, e.g. `{namespace="demo", app="whoami"}`. |
 | `/oauth2/*` | oauth2-proxy sign-in and callback (`/oauth2/sign_out` to log out) |
 
 ## Prerequisites
@@ -30,6 +31,10 @@ k9s                  # uses ./.kubeconfig via mise env; ~/.kube/config is never 
 ```
 
 `manifests/` is mounted live into k3s's auto-deploy directory, so saving a file there re-applies it within seconds.
+- Removing an object from a file deletes it from the cluster.
+- Changing a `HelmChart`'s `valuesContent` runs a Helm upgrade.
+- **Deleting a whole file does not delete its objects.** Remove them from the file first, or `kubectl delete` them.
+- Changes to `k3d.yaml` or `secrets.env` need `mise run recreate`.
 
 **Allow-lists.** Each app has its own `sso` forwardAuth Middleware with `?allowed_emails=a@x.com,b@y.com`. Google accounts must also be listed as test users on the consent screen (below).
 

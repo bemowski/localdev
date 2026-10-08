@@ -44,6 +44,12 @@ spec:
           auto_sign_up: true
         users:
           auto_assign_org_role: Admin   # the SSO allow-list is the gate
+      additionalDataSources:
+        - name: Loki                    # deployed by 60-logging.yaml
+          type: loki
+          uid: loki
+          url: http://loki.monitoring.svc:3100
+          access: proxy
 
     prometheus:
       prometheusSpec:
