@@ -1,10 +1,18 @@
-# cnav — cluster navigator: static page rendering cards from /etc/cnav/cards.yaml
+# cnav — cluster navigator: cards (cards.yaml) + live status column (status.yaml, /api/status)
 #   build + push: mise run build cnav    (from kube/localdev)
-#   run locally:  docker run --rm -p 8080:8080 localhost:5005/cnav
-FROM nginxinc/nginx-unprivileged:1.30-alpine
+#   run locally:  docker run --rm -p 8080:8080 localhost:5005/cnav   (status shows "unavailable" outside a cluster)
+FROM python:3.13-alpine
 
-ADD --chmod=644 https://cdn.jsdelivr.net/npm/js-yaml@4.1.0/dist/js-yaml.min.js /usr/share/nginx/html/js-yaml.min.js
-COPY --chmod=644 index.html /usr/share/nginx/html/index.html
-COPY --chmod=644 nginx.conf /etc/nginx/conf.d/default.conf
-# default cards; in-cluster a ConfigMap is mounted over /etc/cnav
-COPY --chmod=644 cards.yaml /etc/cnav/cards.yaml
+RUN pip install --no-cache-dir pyyaml==6.0.3
+
+ADD https://cdn.jsdelivr.net/npm/js-yaml@4.1.0/dist/js-yaml.min.js /app/static/js-yaml.min.js
+COPY static/ /app/static/
+COPY server.py /app/server.py
+# defaults; in-cluster the cnav-config ConfigMap is mounted over /etc/cnav
+COPY cards.yaml status.yaml /etc/cnav/
+# world-readable files, traversable dirs (ADD from a URL lands as 0600)
+RUN chmod -R a+rX /app /etc/cnav
+
+USER 65534
+EXPOSE 8080
+CMD ["python", "-u", "/app/server.py"]

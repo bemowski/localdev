@@ -1,0 +1,92 @@
+# Registry UI (joxit/docker-registry-ui) at /registry/ — browses the k3d registry
+# (localdev-registry container, see k3d.yaml). Behind SSO, read-only.
+# The UI's own nginx proxies /v2 to the registry, so the browser never talks to it directly.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: registry-ui
+  namespace: tools
+  labels: {app: registry-ui}
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {app: registry-ui}
+  template:
+    metadata:
+      labels: {app: registry-ui}
+    spec:
+      containers:
+        - name: registry-ui
+          image: joxit/docker-registry-ui:2.6.0
+          ports:
+            - containerPort: 80
+          env:
+            - {name: NGINX_PROXY_PASS_URL, value: "http://localdev-registry:5000"}   # k3d adds it to CoreDNS
+            - {name: REGISTRY_URL, value: "http://localhost/registry"}               # browser -> /registry/v2 -> strip -> proxy
+            - {name: PULL_URL, value: "localhost:5005"}                              # what `docker pull` hints show
+            - {name: SINGLE_REGISTRY, value: "true"}
+            - {name: REGISTRY_TITLE, value: "localdev"}
+            - {name: DELETE_IMAGES, value: "false"}
+            - {name: SHOW_CONTENT_DIGEST, value: "true"}
+            - {name: SHOW_CATALOG_NB_TAGS, value: "true"}
+          readinessProbe:
+            httpGet: {path: /, port: 80}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: registry-ui
+  namespace: tools
+spec:
+  selector: {app: registry-ui}
+  ports:
+    - port: 80
+---
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  name: sso
+  namespace: tools
+spec:
+  forwardAuth:
+    address: http://oauth2-proxy.auth.svc.cluster.local/oauth2/auth?allowed_emails=bemowski@gmail.com
+    authResponseHeaders: [X-Auth-Request-Email, X-Auth-Request-User]
+---
+# /registry -> /registry/ so the UI's relative asset paths resolve under the prefix
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  name: registry-slash
+  namespace: tools
+spec:
+  redirectRegex:
+    regex: ^(https?://[^/]+/registry)$
+    replacement: ${1}/
+---
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  name: registry-strip
+  namespace: tools
+spec:
+  stripPrefix:
+    prefixes: [/registry]
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: registry-ui
+  namespace: tools
+  annotations:
+    traefik.ingress.kubernetes.io/router.middlewares: auth-auth-errors@kubernetescrd,tools-sso@kubernetescrd,tools-registry-slash@kubernetescrd,tools-registry-strip@kubernetescrd
+spec:
+  rules:
+    - http:
+        paths:
+          - path: /registry
+            pathType: Prefix
+            backend:
+              service:
+                name: registry-ui
+                port:
+                  number: 80

@@ -11,3 +11,11 @@
   icon: 🔥
   link: /prometheus/
   description: Metrics and scrape targets
+- component: Registry
+  icon: 📦
+  link: /registry/
+  description: Images in the localdev registry
+- component: whoami
+  icon: 👋
+  link: /whoami
+  description: SSO test app, echoes request headers

@@ -1,0 +1,8 @@
+# Status column. Groups -> items -> checks. An item's light is the worst of its checks.
+# Check kinds: Deployment | StatefulSet | DaemonSet (namespace + name), HelmChart (name).
+# Optional per item: link (defaults to the first workload in Headlamp).
+- group: apps
+  items:
+    - name: whoami
+      checks:
+        - {kind: Deployment, namespace: demo, name: whoami}

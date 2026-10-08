@@ -10,6 +10,7 @@ Ephemeral local Kubernetes (k3d) with path-based routing on `http://localhost/<a
 | `/grafana` | Grafana. You're signed in from the SSO email header, as an org Admin. |
 | `/prometheus` | Prometheus UI. Use `/prometheus/targets` for scrape health. |
 | `/alertmanager` | Alertmanager UI |
+| `/registry` | Registry UI (joxit/docker-registry-ui), read-only, for browsing images in the k3d registry (`localhost:5005`) |
 | *(no route)* | Loki holds every pod's logs, shipped by Alloy. Query them in Grafana → Explore → Loki, e.g. `{namespace="demo", app="whoami"}`. |
 | `/oauth2/*` | oauth2-proxy sign-in and callback (`/oauth2/sign_out` to log out) |
 
@@ -39,6 +40,7 @@ manifests/
   00-namespaces.yaml
   10-platform/  10-1-traefik-config  10-2-oauth2-proxy
   20-infra/     20-1-headlamp  20-2-monitoring  20-3-logging
+  30-tools/     30-1-registry-ui
   50-apps/      50-1-whoami  50-2-cnav
 ```
 - Subfolders work at any depth.
@@ -57,10 +59,14 @@ manifests/
 
 Each `apps/<name>/` directory holds a Dockerfile. `mise run build <name>` builds it as `localhost:5005/<name>:latest`, pushes it to the k3d registry and restarts any deployment labelled `app=<name>`. Inside the cluster, the image is pulled as `localdev-registry:5005/<name>:latest`. `mise run create` builds every app.
 
-- **cnav** (`apps/cnav`, deployed by `manifests/50-apps/50-2-cnav.yaml`): nginx serving a page that renders cards from `cards.yaml`.
-  - To change the cards, edit the `cnav-cards` ConfigMap in `manifests/50-apps/50-2-cnav.yaml`. The page updates within about a minute, with no rebuild.
-  - Card fields: `component`, `icon` (an emoji), `link`, and an optional `description`.
-  - The `cards.yaml` baked into the image is only the default, used when you run the image on its own.
+- **cnav** (`apps/cnav`, deployed by `manifests/50-apps/50-2-cnav.yaml`): a small Python server (stdlib plus PyYAML) serving the navigator page.
+  - **Cards (left):** from `cards.yaml`. Fields: `component`, `icon` (an emoji), `link`, and an optional `description`.
+  - **Status column (right):** from `status.yaml`. It's organised as groups, then items, then checks. Check kinds are `Deployment`, `StatefulSet` and `DaemonSet` (with `namespace` and `name`), and `HelmChart` (with `name`). An item's light is the worst of its checks, and a group's light is the worst of its items. Clicking a row opens the first workload in Headlamp. The column refreshes every 10 seconds.
+    - **Green:** all replicas ready.
+    - **Amber:** partially ready, a rollout in progress, starting up (under 2 minutes), restarted in the last 10 minutes, Helm still installing, or scaled to 0.
+    - **Red:** no ready replicas, CrashLoopBackOff, an image pull error, a config error, stuck Pending (over 2 minutes), a failed Helm install, or the workload not found. The reason is shown under the row.
+  - **Editing:** both files live in the `cnav-config` ConfigMap. Edit them there and the page picks up the change within about a minute, with no rebuild. The copies in `apps/cnav/` are only defaults for running the image on its own, where the status column shows "unavailable".
+  - **Access:** the `cnav-status` ClusterRole gives read-only access to workloads, pods, jobs and HelmCharts.
 
 ## Google OAuth client (one-time setup)
 

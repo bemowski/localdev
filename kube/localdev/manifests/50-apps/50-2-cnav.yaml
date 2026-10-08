@@ -1,10 +1,10 @@
-# Cluster navigator at / — cards with links to the other apps. Behind SSO.
-# Image: apps/cnav, built and pushed by `mise run build cnav`.
-# Edit the cards below; the page picks them up within ~a minute, no rebuild.
+# Cluster navigator at / — cards linking to the apps, plus a live status column. Behind SSO.
+# Image: apps/cnav (Python), built and pushed by `mise run build cnav`.
+# Edit cards.yaml / status.yaml below; the page picks them up within ~a minute, no rebuild.
 apiVersion: v1
 kind: ConfigMap
 metadata:
-  name: cnav-cards
+  name: cnav-config
   namespace: cnav
 data:
   cards.yaml: |
@@ -20,6 +20,110 @@ data:
       icon: 🔥
       link: /prometheus/
       description: Metrics and scrape targets
+    - component: Registry
+      icon: 📦
+      link: /registry/
+      description: Images in the localdev registry
+    - component: whoami
+      icon: 👋
+      link: /whoami
+      description: SSO test app, echoes request headers
+  # Groups -> items -> checks; an item's light is the worst of its checks.
+  # kinds: Deployment | StatefulSet | DaemonSet (namespace, name) | HelmChart (name)
+  status.yaml: |
+    - group: platform
+      items:
+        - name: Traefik
+          checks:
+            - {kind: Deployment, namespace: kube-system, name: traefik}
+            - {kind: HelmChart, name: traefik}
+        - name: oauth2-proxy
+          checks:
+            - {kind: Deployment, namespace: auth, name: oauth2-proxy}
+            - {kind: HelmChart, name: oauth2-proxy}
+        - name: CoreDNS
+          checks:
+            - {kind: Deployment, namespace: kube-system, name: coredns}
+    - group: infra
+      items:
+        - name: Headlamp
+          checks:
+            - {kind: Deployment, namespace: headlamp, name: headlamp}
+            - {kind: HelmChart, name: headlamp}
+        - name: Prometheus
+          checks:
+            - {kind: StatefulSet, namespace: monitoring, name: prometheus-kps-prometheus}
+            - {kind: Deployment, namespace: monitoring, name: kps-operator}
+            - {kind: HelmChart, name: kube-prometheus-stack}
+        - name: Grafana
+          checks:
+            - {kind: Deployment, namespace: monitoring, name: grafana}
+        - name: Alertmanager
+          checks:
+            - {kind: StatefulSet, namespace: monitoring, name: alertmanager-kps-alertmanager}
+        - name: Exporters
+          checks:
+            - {kind: DaemonSet, namespace: monitoring, name: kube-prometheus-stack-prometheus-node-exporter}
+            - {kind: Deployment, namespace: monitoring, name: kube-prometheus-stack-kube-state-metrics}
+        - name: Loki
+          checks:
+            - {kind: StatefulSet, namespace: monitoring, name: loki}
+            - {kind: HelmChart, name: loki}
+        - name: Alloy
+          checks:
+            - {kind: Deployment, namespace: monitoring, name: alloy}
+            - {kind: HelmChart, name: alloy}
+    - group: tools
+      items:
+        - name: Registry UI
+          checks:
+            - {kind: Deployment, namespace: tools, name: registry-ui}
+    - group: apps
+      items:
+        - name: whoami
+          checks:
+            - {kind: Deployment, namespace: demo, name: whoami}
+        - name: cnav
+          checks:
+            - {kind: Deployment, namespace: cnav, name: cnav}
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: cnav
+  namespace: cnav
+---
+# read-only: just what /api/status looks at
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: cnav-status
+rules:
+  - apiGroups: ["apps"]
+    resources: [deployments, statefulsets, daemonsets]
+    verbs: [get, list]
+  - apiGroups: [""]
+    resources: [pods]
+    verbs: [get, list]
+  - apiGroups: ["batch"]
+    resources: [jobs]
+    verbs: [get]
+  - apiGroups: ["helm.cattle.io"]
+    resources: [helmcharts]
+    verbs: [get]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: cnav-status
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: cnav-status
+subjects:
+  - kind: ServiceAccount
+    name: cnav
+    namespace: cnav
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -35,6 +139,8 @@ spec:
     metadata:
       labels: {app: cnav}
     spec:
+      serviceAccountName: cnav
+      enableServiceLinks: false   # no CNAV_PORT=tcp://... style env vars
       containers:
         - name: cnav
           image: localdev-registry:5005/cnav:latest
@@ -42,14 +148,14 @@ spec:
           ports:
             - containerPort: 8080
           readinessProbe:
-            httpGet: {path: /, port: 8080}
+            httpGet: {path: /healthz, port: 8080}
           volumeMounts:
-            - name: cards
+            - name: config
               mountPath: /etc/cnav   # whole dir (not subPath) so ConfigMap edits propagate
       volumes:
-        - name: cards
+        - name: config
           configMap:
-            name: cnav-cards
+            name: cnav-config
 ---
 apiVersion: v1
 kind: Service
