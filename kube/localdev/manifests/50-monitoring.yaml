@@ -1,0 +1,106 @@
+# kube-prometheus-stack at /grafana, /prometheus, /alertmanager — all behind SSO.
+# Grafana trusts the X-Auth-Request-Email header from oauth2-proxy (no second login).
+# No persistence: data lives as long as the cluster.
+apiVersion: helm.cattle.io/v1
+kind: HelmChart
+metadata:
+  name: kube-prometheus-stack
+  namespace: kube-system
+spec:
+  repo: https://prometheus-community.github.io/helm-charts
+  chart: kube-prometheus-stack
+  version: 92.1.0
+  targetNamespace: monitoring
+  timeout: 10m
+  valuesContent: |-
+    fullnameOverride: kps
+
+    # k3s embeds these in the server process; their scrape targets would be down forever
+    kubeControllerManager: {enabled: false}
+    kubeScheduler: {enabled: false}
+    kubeEtcd: {enabled: false}
+    kubeProxy: {enabled: false}
+
+    # k3d nodes are containers: / is not a shared mount
+    prometheus-node-exporter:
+      hostRootFsMount: {enabled: false}
+
+    grafana:
+      fullnameOverride: grafana
+      serviceMonitor:
+        path: /grafana/metrics   # serve_from_sub_path redirects /metrics to root_url
+      grafana.ini:
+        server:
+          domain: localhost
+          root_url: "%(protocol)s://%(domain)s/grafana/"
+          serve_from_sub_path: true
+        auth:
+          disable_login_form: true
+          disable_signout_menu: true
+        auth.proxy:
+          enabled: true
+          header_name: X-Auth-Request-Email
+          header_property: email
+          auto_sign_up: true
+        users:
+          auto_assign_org_role: Admin   # the SSO allow-list is the gate
+
+    prometheus:
+      prometheusSpec:
+        routePrefix: /prometheus
+        externalUrl: http://localhost/prometheus
+        retention: 2d
+        # pick up every ServiceMonitor/PodMonitor/rule in the cluster, not just this release's
+        serviceMonitorSelectorNilUsesHelmValues: false
+        podMonitorSelectorNilUsesHelmValues: false
+        ruleSelectorNilUsesHelmValues: false
+        probeSelectorNilUsesHelmValues: false
+        scrapeConfigSelectorNilUsesHelmValues: false
+
+    alertmanager:
+      alertmanagerSpec:
+        routePrefix: /alertmanager
+        externalUrl: http://localhost/alertmanager
+---
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  name: sso
+  namespace: monitoring
+spec:
+  forwardAuth:
+    address: http://oauth2-proxy.auth.svc.cluster.local/oauth2/auth?allowed_emails=bemowski@gmail.com
+    authResponseHeaders: [X-Auth-Request-Email, X-Auth-Request-User]
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: monitoring
+  namespace: monitoring
+  annotations:
+    traefik.ingress.kubernetes.io/router.middlewares: auth-auth-errors@kubernetescrd,monitoring-sso@kubernetescrd
+spec:
+  rules:
+    - http:
+        paths:
+          - path: /grafana
+            pathType: Prefix
+            backend:
+              service:
+                name: grafana
+                port:
+                  number: 80
+          - path: /prometheus
+            pathType: Prefix
+            backend:
+              service:
+                name: kps-prometheus
+                port:
+                  number: 9090
+          - path: /alertmanager
+            pathType: Prefix
+            backend:
+              service:
+                name: kps-alertmanager
+                port:
+                  number: 9093

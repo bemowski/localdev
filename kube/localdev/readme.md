@@ -6,7 +6,10 @@ Ephemeral local Kubernetes (k3d) with path-based routing on `http://localhost/<a
 |---|---|
 | `/whoami` | SSO test app. It echoes the request headers, including `X-Auth-Request-Email`. |
 | `/headlamp` | Kubernetes UI. No token login: Headlamp acts as its own cluster-admin account, so the SSO allow-list is the only gate. |
-| `/oauth2/*` | oauth2-proxy sign-in and callback |
+| `/grafana` | Grafana. You're signed in from the SSO email header, as an org Admin. |
+| `/prometheus` | Prometheus UI. Use `/prometheus/targets` for scrape health. |
+| `/alertmanager` | Alertmanager UI |
+| `/oauth2/*` | oauth2-proxy sign-in and callback (`/oauth2/sign_out` to log out) |
 
 ## Prerequisites
 
