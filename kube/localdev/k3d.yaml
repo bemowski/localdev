@@ -17,6 +17,10 @@ volumes:
   - volume: ${LOCALDEV_ROOT}/runtime.data:/runtime.data   # e.g. postgres -> /runtime.data/postgres
     nodeFilters:
       - server:0
+  # Grafana provisions dashboards from here, live (see manifests/20-infra/20-2-monitoring.yaml)
+  - volume: ${LOCALDEV_ROOT}/grafana/dashboards:/grafana-dashboards
+    nodeFilters:
+      - server:0
 registries:
   create:
     name: localdev-registry
@@ -24,6 +28,7 @@ registries:
     hostPort: "5005"
     volumes:
       - ${LOCALDEV_ROOT}/runtime.data/registry:/var/lib/registry   # images survive recreate
+      - ${LOCALDEV_ROOT}/registry/config.yml:/etc/docker/registry/config.yml   # + /metrics on :5001
 options:
   kubeconfig:
     updateDefaultKubeconfig: false

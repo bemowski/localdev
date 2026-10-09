@@ -1,0 +1,88 @@
+# Prometheus scrape targets the charts don't create themselves. Kept in one file because
+# they need the prometheus-operator CRDs (from 20-2-monitoring); on a fresh cluster k3s
+# retries this file until those exist.
+# (NATS ships its own PodMonitor via its chart; kube-prometheus-stack covers the k8s internals.)
+
+# --- apps convention ---------------------------------------------------------------
+# Any pod, in any namespace, labelled `metrics: enabled` gets its port named `metrics`
+# scraped at /metrics. Developers opt in with one label + a named port; see readme.md.
+apiVersion: monitoring.coreos.com/v1
+kind: PodMonitor
+metadata:
+  name: metrics-enabled
+  namespace: monitoring
+spec:
+  namespaceSelector: {any: true}
+  selector:
+    matchLabels: {metrics: enabled}
+  podMetricsEndpoints:
+    - port: metrics
+      path: /metrics
+      interval: 30s
+      relabelings:   # job = the pod's app label, so dashboards can filter per app
+        - sourceLabels: [__meta_kubernetes_pod_label_app]
+          targetLabel: job
+---
+# --- platform ------------------------------------------------------------------------
+apiVersion: monitoring.coreos.com/v1
+kind: PodMonitor
+metadata:
+  name: traefik
+  namespace: kube-system
+spec:
+  selector:
+    matchLabels: {app.kubernetes.io/name: traefik}
+  podMetricsEndpoints:
+    - port: metrics
+      path: /metrics
+---
+apiVersion: monitoring.coreos.com/v1
+kind: PodMonitor
+metadata:
+  name: oauth2-proxy
+  namespace: auth
+spec:
+  selector:
+    matchLabels: {app.kubernetes.io/name: oauth2-proxy}
+  podMetricsEndpoints:
+    - port: metrics
+      path: /metrics
+---
+# --- infra ---------------------------------------------------------------------------
+apiVersion: monitoring.coreos.com/v1
+kind: PodMonitor
+metadata:
+  name: loki
+  namespace: monitoring
+spec:
+  selector:
+    matchLabels: {app.kubernetes.io/name: loki, app.kubernetes.io/component: single-binary}
+  podMetricsEndpoints:
+    - port: http-metrics
+      path: /metrics
+---
+apiVersion: monitoring.coreos.com/v1
+kind: PodMonitor
+metadata:
+  name: alloy
+  namespace: monitoring
+spec:
+  selector:
+    matchLabels: {app.kubernetes.io/name: alloy}
+  podMetricsEndpoints:
+    - port: http-metrics
+      path: /metrics
+---
+# --- tools ---------------------------------------------------------------------------
+# The k3d registry is a container outside the cluster (see k3d.yaml); its debug listener
+# (registry/config.yml) serves /metrics. k3d puts its name in CoreDNS, so it's reachable.
+apiVersion: monitoring.coreos.com/v1alpha1
+kind: ScrapeConfig
+metadata:
+  name: localdev-registry
+  namespace: monitoring
+spec:
+  metricsPath: /metrics
+  staticConfigs:
+    - targets: ["localdev-registry:5001"]
+      labels: {job: registry}

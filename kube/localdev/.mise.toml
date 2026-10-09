@@ -1,5 +1,6 @@
 # kube/localdev — ephemeral local kubernetes (k3d)
 #   mise run create | status | destroy | recreate | build <app> | clean | pg:forward | pg:psql
+#   mise run grafana:list | grafana:export | grafana:import | grafana:fetch   (see grafana/dashtool.py)
 #   see readme.md
 
 [tools]
@@ -129,3 +130,47 @@ kubectl -n tools port-forward svc/postgres-rw "${usage_port}:5432"
 description = "psql shell in the postgres pod (as app, db app)"
 raw = true
 run = "kubectl -n tools exec -it statefulset/postgres -- psql -U app app"
+
+# --- grafana dashboards (grafana/dashboards/<folder>/*.json, provisioned live) ---------
+# list/export talk to Grafana through a temporary port-forward; import/fetch only write files.
+
+[tasks."grafana:list"]
+description = "List dashboards in Grafana (folder, uid, title)"
+run = """#!/bin/bash
+set -euo pipefail
+kubectl -n monitoring port-forward svc/grafana 13000:80 >/dev/null 2>&1 & pf=$!
+trap 'kill $pf' EXIT
+until curl -sf -o /dev/null http://localhost:13000/grafana/api/health; do sleep 0.3; done
+python3 grafana/dashtool.py list
+"""
+
+[tasks."grafana:export"]
+description = "Save a Grafana dashboard to grafana/dashboards/<folder>/ (default: its Grafana folder, else apps)"
+usage = '''
+arg "<dashboard>" help="uid or title search"
+arg "[folder]" help="platform | infra | tools | apps | <new folder>"
+'''
+run = """#!/bin/bash
+set -euo pipefail
+kubectl -n monitoring port-forward svc/grafana 13000:80 >/dev/null 2>&1 & pf=$!
+trap 'kill $pf' EXIT
+until curl -sf -o /dev/null http://localhost:13000/grafana/api/health; do sleep 0.3; done
+python3 grafana/dashtool.py export "$usage_dashboard" ${usage_folder:-}
+"""
+
+[tasks."grafana:import"]
+description = "Copy dashboard JSON file(s) into grafana/dashboards/<folder>/ (normalized; Grafana loads them live)"
+usage = '''
+arg "<path>" help="a .json file or a directory of them"
+arg "[folder]" default="apps"
+'''
+dir = "{{cwd}}"   # resolve <path> from where you ran mise
+run = 'python3 "{{config_root}}/grafana/dashtool.py" import "$usage_path" "$usage_folder"'
+
+[tasks."grafana:fetch"]
+description = "Download a grafana.com dashboard into grafana/dashboards/<folder>/"
+usage = '''
+arg "<id>" help="grafana.com dashboard id"
+arg "<folder>"
+'''
+run = 'python3 grafana/dashtool.py fetch "$usage_id" "$usage_folder"'

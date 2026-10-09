@@ -9,3 +9,8 @@ spec:
     providers:
       kubernetesCRD:
         allowCrossNamespace: true
+    # per-router (= per Ingress) request metrics for the Traefik dashboard;
+    # scraped by the PodMonitor in 20-4-scrape.yaml
+    metrics:
+      prometheus:
+        addRoutersLabels: true

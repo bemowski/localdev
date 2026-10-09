@@ -1,0 +1,26 @@
+# Config for the k3d registry container (localdev-registry, see k3d.yaml), mounted over
+# /etc/docker/registry/config.yml. Stock registry:2 config plus a debug listener that
+# serves Prometheus metrics (scraped via the ScrapeConfig in manifests/20-infra/20-4-scrape.yaml).
+version: 0.1
+log:
+  fields:
+    service: registry
+storage:
+  cache:
+    blobdescriptor: inmemory
+  filesystem:
+    rootdirectory: /var/lib/registry
+http:
+  addr: :5000
+  headers:
+    X-Content-Type-Options: [nosniff]
+  debug:
+    addr: :5001
+    prometheus:
+      enabled: true
+      path: /metrics
+health:
+  storagedriver:
+    enabled: true
+    interval: 10s
+    threshold: 3

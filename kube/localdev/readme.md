@@ -21,6 +21,12 @@ Ephemeral local Kubernetes (k3d) with path-based routing on `http://localhost/<a
 - **Docker.** On Linux, your user must be in the `docker` group. On WSL2, use Docker Desktop with WSL integration or native Docker inside WSL. On macOS, use Docker Desktop, OrbStack or Colima.
 - **Free host ports:** 80 (ingress) and 5005 (local registry `localdev-registry`). Check with `ss -ltn`. On Linux, binding port 80 works because Docker does it as root.
 - **About 4 GB of RAM free for Docker.**
+- **Linux: raise the inotify limits.** Every k3d node shares the host kernel, and following container logs (Alloy → Loki) uses one inotify instance per stream. The default of 128 runs out, and pods then log `failed to create fsnotify watcher: too many open files` instead of their real output. Raise it once:
+  ```bash
+  printf 'fs.inotify.max_user_instances=1024\nfs.inotify.max_user_watches=1048576\n' | sudo tee /etc/sysctl.d/99-localdev.conf
+  sudo sysctl --system
+  ```
+  Docker Desktop and OrbStack on macOS and WSL2 run their own VM kernels, and usually already allow more.
 - **mise.** Run `mise install` in this directory to get k3d, kubectl, helm and k9s.
 - **`secrets.env` or `secrets.env.asc`**, from the Google OAuth setup below.
 
@@ -35,6 +41,10 @@ mise run build cnav  # rebuild apps/cnav, push to the local registry, restart it
 mise run pg:forward  # postgres on localhost:5432 (pass a port to change it)
 mise run pg:psql     # psql shell in the postgres pod
 mise run clean       # delete runtime.data (asks first; cluster must be destroyed)
+mise run grafana:list                    # dashboards in Grafana
+mise run grafana:export "<title|uid>"    # Grafana UI -> grafana/dashboards/<folder>/
+mise run grafana:import <file|dir> [folder]
+mise run grafana:fetch <grafana.com id> <folder>
 k9s                  # uses ./.kubeconfig via mise env; ~/.kube/config is never touched
 ```
 
@@ -44,7 +54,7 @@ k9s                  # uses ./.kubeconfig via mise env; ~/.kube/config is never 
 manifests/
   00-namespaces.yaml
   10-platform/  10-1-traefik-config  10-2-oauth2-proxy
-  20-infra/     20-1-headlamp  20-2-monitoring  20-3-logging
+  20-infra/     20-1-headlamp  20-2-monitoring  20-3-logging  20-4-scrape
   30-tools/     30-1-registry-ui  30-2-postgres  30-3-nats
   50-apps/      50-1-whoami  50-2-cnav
 ```
@@ -59,6 +69,49 @@ manifests/
 - Changes to `k3d.yaml` or `secrets.env` need `mise run recreate`. `runtime.data/` is kept across it.
 
 **Allow-lists.** Each app has its own `sso` forwardAuth Middleware with `?allowed_emails=a@x.com,b@y.com`. Google accounts must also be listed as test users on the consent screen (below).
+
+## Grafana dashboards (`grafana/`)
+
+Dashboards are files: `grafana/dashboards/<folder>/*.json`. The folder is mounted live into the cluster, and Grafana shows **one folder per directory**, re-reading files every 10 seconds:
+
+| folder | what's in it |
+|---|---|
+| `platform/` | Traefik (requests, latency and errors per Ingress), oauth2-proxy (SSO checks, 401s and 403s), CoreDNS, API server, kubelet, cluster compute |
+| `infra/` | Kubernetes compute and networking by namespace, workload and pod; node exporter; Prometheus; Alertmanager; Grafana; Loki & Alloy health; Logs overview (filter by namespace and app, regex search) |
+| `tools/` | Postgres (9628), Postgres top queries (pg_stat_statements), NATS server (2279), NATS JetStream (14725), Docker registry (9621) |
+| `apps/` | yours |
+
+**Developer workflow:**
+1. Build or edit a dashboard in the Grafana UI. Provisioned dashboards can be edited and saved there.
+2. Run `mise run grafana:export "My dashboard"` (a title search or a uid). It writes clean JSON to `grafana/dashboards/<folder>/<slug>.json`: the dashboard's current folder if it's one of the four, otherwise `apps/`. Pass a folder name to override.
+3. Commit the file. It's what Grafana loads from then on, on this cluster and any other built from the repo.
+
+The other tasks:
+- `grafana:import <file|dir> [folder]` copies dashboard JSON (an exported file, or an API response) into the tree, normalised so it works here.
+- `grafana:fetch <id> <folder>` pulls a community dashboard from grafana.com and resolves its `${DS_…}` data-source inputs to the local `prometheus` and `loki` data sources.
+- All three are `grafana/dashtool.py`.
+
+**Notes:**
+- A dashboard saved in the UI but not exported lives only in Grafana's database, which is lost on `recreate`.
+- To remove a provisioned dashboard, delete its file.
+- The kube-prometheus-stack built-ins were copied into `platform/` and `infra/`, and the chart's own copies are turned off.
+
+### App metrics convention
+
+Any pod in any namespace with the label **`metrics: enabled`** gets its port **named `metrics`** scraped at `/metrics` every 30 seconds. `job` is set to the pod's `app` label. That's all a developer needs: no Prometheus CRDs.
+
+```yaml
+template:
+  metadata:
+    labels: {app: orders, metrics: enabled}
+  spec:
+    containers:
+      - name: orders
+        ports:
+          - {name: metrics, containerPort: 9090}
+```
+
+Postgres uses this convention for its exporter sidecar. The scrape definitions for platform and infra components, and for the registry outside the cluster, are in `manifests/20-infra/20-4-scrape.yaml`.
 
 ## Persistent data (`runtime.data/`)
 
