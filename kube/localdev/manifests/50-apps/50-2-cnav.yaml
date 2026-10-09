@@ -90,11 +90,11 @@ data:
           checks:
             - {kind: StatefulSet, namespace: monitoring, name: tempo}
             - {kind: HelmChart, name: tempo}
-    - group: tools
-      items:
         - name: Registry UI
           checks:
             - {kind: Deployment, namespace: registry, name: registry-ui}
+    - group: tools
+      items:
         - name: Postgres
           checks:
             - {kind: StatefulSet, namespace: pg, name: postgres}

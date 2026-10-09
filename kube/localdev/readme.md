@@ -64,8 +64,8 @@ mise run grafana:check                      # JSON valid + uids unique (a duplic
 manifests/
   00-namespaces.yaml
   10-platform/  10-1-traefik-config  10-2-oauth2-proxy
-  20-infra/     20-1-headlamp  20-2-monitoring  20-3-logging  20-4-scrape  20-5-tracing
-  30-tools/     30-1-registry-ui (ns registry)  30-2-postgres (ns pg)  30-3-nats (ns nats)
+  20-infra/     20-1-headlamp  20-2-monitoring  20-3-logging  20-4-scrape  20-5-tracing  20-6-registry-ui (ns registry)
+  30-tools/     30-2-postgres (ns pg)  30-3-nats (ns nats)
                 30-4-knative-operator  30-5-knative (ns knative-*)  30-6-keycloak (ns keycloak)
   50-apps/      50-1-whoami  50-2-cnav
 ```
@@ -93,8 +93,8 @@ Dashboards are files: `grafana/dashboards/<folder>/*.json`. The folder is mounte
 | folder | what's in it |
 |---|---|
 | `platform/` | Traefik (requests, latency and errors per Ingress), oauth2-proxy (SSO checks, 401s and 403s), CoreDNS, API server, kubelet, cluster compute |
-| `infra/` | Kubernetes compute and networking by namespace, workload and pod; node exporter; Prometheus; Alertmanager; Grafana; Loki & Alloy health; OpenTelemetry services (rate, errors, duration, service graph, traces) |
-| `tools/` | Keycloak (troubleshooting, capacity planning), Postgres (9628), Postgres top queries (pg_stat_statements), NATS server (2279), NATS JetStream (14725), Docker registry (9621), Knative (Serving autoscaling, requests, event deliveries) |
+| `infra/` | Kubernetes compute and networking by namespace, workload and pod; node exporter; Prometheus; Alertmanager; Grafana; Loki & Alloy health; OpenTelemetry services (rate, errors, duration, service graph, traces); Docker registry (9621) |
+| `tools/` | Keycloak (troubleshooting, capacity planning), Postgres (9628), Postgres top queries (pg_stat_statements), NATS server (2279), NATS JetStream (14725), Knative (Serving autoscaling, requests, event deliveries) |
 | `apps/` | yours |
 | *(root)* `logs.json` | **Logs**, top level in Grafana: pod stdout **and** OpenTelemetry logs. Filter by namespace, app/service, **Sources** (tick pod stdout and/or OpenTelemetry), **Level** (Loki's `detected_level`, case-insensitive; synonyms grouped, e.g. warn/warning; `unknown` = no level in the line) and regex search. Error lines: text match for stdout, severity for OTel. |
 
