@@ -268,7 +268,9 @@ class Handler(SimpleHTTPRequestHandler):
             self.end_headers()
             self.wfile.write(data)
             return
-        if not (STATIC_DIR / path.lstrip("/")).is_file():
+        if path == "/signed-out":
+            self.path = "/signed-out.html"  # landing page after /oauth2/sign_out (outside SSO)
+        elif not (STATIC_DIR / path.lstrip("/")).is_file():
             self.path = "/index.html"  # catch-all: unknown paths land on the navigator
         return super().do_GET()
 

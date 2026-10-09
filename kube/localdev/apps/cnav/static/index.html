@@ -45,7 +45,14 @@
   }
   .layout { display: flex; min-height: 100vh; }
   main { flex: 1; min-width: 0; padding: 40px 32px; }
-  header { display: flex; align-items: baseline; gap: 12px; margin-bottom: 28px; }
+  header { display: flex; align-items: center; gap: 12px; margin-bottom: 28px; max-width: 1040px; }
+  .user { margin-left: auto; display: flex; align-items: center; gap: 10px; font-size: 13px; color: var(--muted); }
+  .user b { color: var(--text); font-weight: 600; }
+  .logout {
+    font: inherit; font-size: 13px; color: var(--text); text-decoration: none;
+    padding: 5px 12px; border: 1px solid var(--border); border-radius: 7px; background: var(--card);
+  }
+  .logout:hover, .logout:focus-visible { border-color: var(--accent); color: var(--accent); outline: none; }
   h1 { font-size: 24px; margin: 0; }
   .cluster { color: var(--muted); font-size: 14px; }
   .grid {
@@ -54,7 +61,9 @@
     gap: 16px;
     max-width: 1040px;
   }
+  .card-wrap { position: relative; display: flex; }
   a.card {
+    flex: 1;
     display: flex;
     flex-direction: column;
     gap: 6px;
@@ -68,6 +77,15 @@
     transition: transform .12s ease, border-color .12s ease;
   }
   a.card:hover, a.card:focus-visible { transform: translateY(-2px); border-color: var(--accent); outline: none; }
+  a.flyout {
+    position: absolute; top: 10px; right: 10px;
+    width: 30px; height: 30px; display: grid; place-items: center;
+    border-radius: 7px; color: var(--muted); opacity: .55;
+    transition: opacity .12s ease, background .12s ease, color .12s ease;
+  }
+  .card-wrap:hover a.flyout { opacity: 1; }
+  a.flyout:hover, a.flyout:focus-visible { opacity: 1; color: var(--accent); background: var(--panel); outline: none; }
+  a.flyout svg { width: 16px; height: 16px; }
   .icon { font-size: 56px; line-height: 1; margin-bottom: 10px; }
   .name { font-size: 17px; font-weight: 600; }
   .desc { color: var(--muted); font-size: 14px; }
@@ -150,6 +168,10 @@
     <header>
       <h1>🧭 Cluster Navigator</h1>
       <span class="cluster" id="cluster"></span>
+      <div class="user">
+        <span id="whoami"></span>
+        <a class="logout" href="/oauth2/sign_out?rd=/signed-out" title="Sign out of localdev SSO">Log out</a>
+      </div>
     </header>
     <div class="grid" id="grid"></div>
   </main>
@@ -175,18 +197,40 @@
   }
 
   // --- cards ---
+  const NEW_TAB_SVG = '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" ' +
+    'stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 2.5h4.5V7"/>' +
+    '<path d="M13.5 2.5 7 9"/><path d="M12 9.5v3a1 1 0 0 1-1 1H3.5a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1h3"/></svg>';
+
   function renderCards(cards) {
     const grid = document.getElementById('grid');
     grid.replaceChildren();
     for (const c of cards) {
+      const wrap = el('div', 'card-wrap');
       const a = el('a', 'card');
       a.href = c.link;
       a.append(el('div', 'icon', c.icon || '🔗'), el('div', 'name', c.component));
       if (c.description) a.append(el('div', 'desc', c.description));
       a.append(el('div', 'link', c.link));
-      grid.append(a);
+      const fly = el('a', 'flyout');
+      fly.href = c.link;
+      fly.target = '_blank';
+      fly.rel = 'noopener';
+      fly.title = fly.ariaLabel = `Open ${c.component} in a new tab`;
+      fly.innerHTML = NEW_TAB_SVG;  // static markup, no config data
+      wrap.append(a, fly);
+      grid.append(wrap);
     }
   }
+
+  // --- signed-in user (oauth2-proxy session) ---
+  fetch('/oauth2/userinfo', { cache: 'no-store' })
+    .then(r => r.ok ? r.json() : null)
+    .then(u => {
+      const who = document.getElementById('whoami');
+      if (!u) { who.textContent = 'not signed in'; return; }
+      who.replaceChildren(document.createTextNode('Signed in as '), el('b', null, u.email || u.user));
+    })
+    .catch(() => {});
 
   fetch('cards.yaml', { cache: 'no-store' })
     .then(r => { if (!r.ok) throw new Error(`cards.yaml: HTTP ${r.status}`); return r.text(); })

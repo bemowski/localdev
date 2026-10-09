@@ -209,3 +209,22 @@ spec:
                 name: cnav
                 port:
                   number: 80
+---
+# The only cnav page outside SSO: where /oauth2/sign_out?rd=/signed-out lands.
+# Exact match, so nothing else on cnav becomes public.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: cnav-public
+  namespace: cnav
+spec:
+  rules:
+    - http:
+        paths:
+          - path: /signed-out
+            pathType: Exact
+            backend:
+              service:
+                name: cnav
+                port:
+                  number: 80
