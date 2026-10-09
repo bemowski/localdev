@@ -35,12 +35,13 @@ Ephemeral local Kubernetes (k3d) with path-based routing on `http://localhost/<a
 
 ```bash
 # cluster lifecycle
-mise run cluster:create                     # create cluster, write .kubeconfig, load secrets, build apps
-mise run cluster:status                     # nodes, helm install jobs, ingresses
+mise run cluster:create [profile]           # create cluster with a profile (lite|dev|knative|full), load secrets, build apps
+mise run cluster:profile [profile]          # list profiles / switch the running cluster (adds/removes tools live)
+mise run cluster:status                     # profile, nodes, helm install jobs, ingresses
 mise run cluster:secrets                    # (re)load secrets.env into the cluster: Google client, admin login, Grafana admin
 mise run cluster:destroy                    # delete cluster + .kubeconfig (runtime.data is kept)
-mise run cluster:recreate                   # destroy + create
-mise run cluster:clean                      # delete runtime.data (asks first; cluster must be destroyed)
+mise run cluster:recreate [profile]         # destroy + create
+mise run cluster:clean                      # delete runtime.data (asks first; cluster must be destroyed; keeps the profile)
 
 # apps and tools
 mise run build cnav                         # rebuild apps/cnav, push to the local registry, restart it
@@ -58,17 +59,51 @@ mise run grafana:fetch <grafana.com id> <folder>
 mise run grafana:check                      # JSON valid + uids unique (a duplicate freezes ALL provisioning)
 ```
 
-`manifests/` is mounted live into k3s's auto-deploy directory, so saving a file there re-applies it within seconds.
+## Profiles and components
+
+Not everyone needs every tool. A **profile** (`profiles.toml`) chooses which optional **components** (tools) a cluster runs. Platform, infra and apps always run.
+
+| profile | tools | |
+|---|---|---|
+| `lite` | none | SSO, observability, registry, cnav |
+| `dev` (default) | postgres, nats | app development |
+| `knative` | postgres, nats, knative | serverless and eventing |
+| `full` | postgres, nats, knative, keycloak | everything |
+
+- **Choosing a profile:**
+  - `mise run cluster:create <profile>`. With no argument it uses the last profile, else the default.
+  - `mise run cluster:profile <profile>` switches a running cluster: new tools deploy within seconds, and dropped ones are uninstalled (HelmCharts, namespaces). Their data in `runtime.data/` is kept, so switching back restores it.
+  - `mise run cluster:profile` lists the profiles.
+- **Dependencies:** `requires` in `profiles.toml` adds components automatically (keycloak needs postgres).
+- **A component is a folder:** `components/<name>/manifests/` (deployed by k3s) and `components/<name>/dashboards/` (shown in Grafana's *tools* folder).
+  - To add a tool, create that folder and add it to the profiles you want.
+  - Manifest files must be `.yaml`, never `.json`, because k3s applies every JSON file it sees.
+  - `mise run grafana:export <dashboard> component:<name>` saves a dashboard into a component.
+- **cnav** hides the cards and status rows tagged `tool: <component>` when that component isn't in the profile.
+
+**How it works:** `profile.py` builds **`runtime.profile/`** (gitignored, kept by `cluster:clean`), the view the cluster reads. It contains links only, so edits to the real files stay live:
+- `runtime.profile/manifests/` is mounted as k3s's manifests folder: a **directory link** per layer (`10-platform`, `20-infra`, `50-apps`), plus a real `30-tools/` folder holding a directory link per enabled component (`30-tools/postgres/30-2-postgres.yaml`).
+- `runtime.profile/dashboards/` is Grafana's provider path, with real folders of **file links**.
+
+k3s follows directory links, and Grafana follows file links (not directory links). The repo is mounted read-only inside the node at its own path, and at `/localdev`, so the links resolve in the cluster too.
 
 ```
-manifests/
-  00-namespaces.yaml
-  10-platform/  10-1-traefik-config  10-2-oauth2-proxy
-  20-infra/     20-1-headlamp  20-2-monitoring  20-3-logging  20-4-scrape  20-5-tracing  20-6-registry-ui (ns registry)
-  30-tools/     30-2-postgres (ns pg)  30-3-nats (ns nats)
-                30-4-knative-operator  30-5-knative (ns knative-*)  30-6-keycloak (ns keycloak)
-  50-apps/      50-1-whoami  50-2-cnav
+manifests/                       # always on
+  10-platform/  10-1-traefik-config  10-2-oauth2-proxy (ns auth)
+  20-infra/     20-1-headlamp (ns headlamp)  20-2-monitoring (ns monitoring)  20-3-logging  20-4-scrape  20-5-tracing  20-6-registry-ui (ns registry)
+  50-apps/      50-1-whoami (ns demo)  50-2-cnav (ns cnav)
+components/                      # optional, chosen by profile
+  postgres/  manifests/30-2-postgres (ns pg)              dashboards/
+  nats/      manifests/30-3-nats (ns nats)                dashboards/
+  knative/   manifests/30-4-knative-operator 30-5-knative (ns knative-*)  dashboards/
+  keycloak/  manifests/30-6-keycloak (ns keycloak)        dashboards/
+grafana/dashboards/              # always on: platform/ infra/ apps/ logs.json
+profiles.toml  profile.py  runtime.profile/ (generated)  runtime.data/ (data)
 ```
+
+### Manifest rules
+Files are applied live: saving a file re-applies it within seconds.
+- **Each file creates the namespace(s) it uses**, at the top of the file, and HelmCharts set `createNamespace: true`. That way a component brings, and takes away, its own namespaces. k3s retries a file until it applies, so the order sorts itself out.
 - Subfolders work at any depth.
 - **Filenames must be unique across the whole tree.** k3s tracks each file as an AddOn named after the file's base name, ignoring the folder.
   - The name is cut at the **first dot**. `10.1-a.yaml` and `10.2-b.yaml` would both become AddOn `10`, and the two files would keep deleting each other's objects.
@@ -88,13 +123,13 @@ manifests/
 
 ## Grafana dashboards (`grafana/`)
 
-Dashboards are files: `grafana/dashboards/<folder>/*.json`. The folder is mounted live into the cluster, and Grafana shows **one folder per directory**, re-reading files every 10 seconds:
+Dashboards are files: `grafana/dashboards/<folder>/*.json`. The folder is mounted live into the cluster, and Grafana shows **one folder per directory**, re-reading files every 15 seconds:
 
 | folder | what's in it |
 |---|---|
 | `platform/` | Traefik (requests, latency and errors per Ingress), oauth2-proxy (SSO checks, 401s and 403s), CoreDNS, API server, kubelet, cluster compute |
 | `infra/` | Kubernetes compute and networking by namespace, workload and pod; node exporter; Prometheus; Alertmanager; Grafana; Loki & Alloy health; OpenTelemetry services (rate, errors, duration, service graph, traces); Docker registry (9621) |
-| `tools/` | Keycloak (troubleshooting, capacity planning), Postgres (9628), Postgres top queries (pg_stat_statements), NATS server (2279), NATS JetStream (14725), Knative (Serving autoscaling, requests, event deliveries) |
+| `tools/` | *from the enabled components (`components/*/dashboards/`):* Keycloak (troubleshooting, capacity planning), Postgres (9628), Postgres top queries (pg_stat_statements), NATS server (2279), NATS JetStream (14725), Knative (Serving autoscaling, requests, event deliveries) |
 | `apps/` | yours |
 | *(root)* `logs.json` | **Logs**, top level in Grafana: pod stdout **and** OpenTelemetry logs. Filter by namespace, app/service, **Sources** (tick pod stdout and/or OpenTelemetry), **Level** (Loki's `detected_level`, case-insensitive; synonyms grouped, e.g. warn/warning; `unknown` = no level in the line) and regex search. Error lines: text match for stdout, severity for OTel. |
 
@@ -180,7 +215,7 @@ The OpenTelemetry Operator (zero-code auto-instrumentation through a pod annotat
 
 ## Postgres
 
-Postgres 18 is a single-instance StatefulSet in namespace `pg` (`manifests/30-tools/30-2-postgres.yaml`), with no operator.
+Postgres 18 is a single-instance StatefulSet in namespace `pg` (`components/postgres/manifests/30-2-postgres.yaml`), with no operator.
 - **Credentials** (fixed, dev only): user `app`, password `localdev`, database `app`.
 - **In-cluster connection:** host `postgres-rw.pg.svc:5432`. The Secret `postgres-app` has the keys `username`, `password`, `dbname`, `host`, `port`, `uri` and `jdbc-uri`.
 - **From your desktop:** run `mise run pg:forward`, then connect to `postgresql://app:localdev@localhost:5432/app`.
@@ -192,7 +227,7 @@ Postgres 18 is a single-instance StatefulSet in namespace `pg` (`manifests/30-to
 
 ## NATS
 
-NATS 2.15 runs as a single server with JetStream in namespace `nats` (`manifests/30-tools/30-3-nats.yaml`, official `nats` chart).
+NATS 2.15 runs as a single server with JetStream in namespace `nats` (`components/nats/manifests/30-3-nats.yaml`, official `nats` chart).
 - **Client URL:** `nats://nats.nats.svc:4222`, with no auth (local only).
 - **Monitoring endpoint:** `http://nats.nats.svc:8222` (`/varz`, `/connz`, `/subsz`, `/jsz`).
 - **Web UI:** NUI at `/nats/`. It's preloaded with a `localdev` connection from the `nui-contexts` ConfigMap. Open the connection, then use Messages to subscribe to a subject or wildcard (`demo.>`, `>`) and watch traffic live.
@@ -236,7 +271,7 @@ To expose one later, add a wildcard `*.knative.localhost` route to Kourier and r
 
 ## Keycloak (identity provider for apps)
 
-Keycloak 26 runs in namespace `keycloak` (`manifests/30-tools/30-6-keycloak.yaml`) as an **OIDC/OAuth server for the apps you build**: realms, clients, roles and test users. localdev's own sign-in (oauth2-proxy) is separate and unaffected.
+Keycloak 26 runs in namespace `keycloak` (`components/keycloak/manifests/30-6-keycloak.yaml`) as an **OIDC/OAuth server for the apps you build**: realms, clients, roles and test users. localdev's own sign-in (oauth2-proxy) is separate and unaffected.
 
 | what | URL |
 |---|---|

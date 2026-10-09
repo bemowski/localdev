@@ -13,6 +13,7 @@ spec:
   chart: loki
   version: 7.3.0
   targetNamespace: monitoring
+  createNamespace: true
   valuesContent: |-
     deploymentMode: SingleBinary
     loki:
@@ -49,6 +50,7 @@ spec:
   chart: alloy
   version: 1.13.0
   targetNamespace: monitoring
+  createNamespace: true
   valuesContent: |-
     # Tails logs through the API server, not host paths: one replica covers every node.
     controller:

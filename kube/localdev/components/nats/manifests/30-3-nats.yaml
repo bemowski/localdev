@@ -4,6 +4,11 @@
 #   CLI:         kubectl -n nats exec -it deploy/nats-box -- nats sub '>'
 #   UI:          NUI at /nats/ (behind SSO), preloaded with a "localdev" connection
 # JetStream data lives in runtime.data/nats (like postgres), so streams survive recreate.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: nats
+---
 apiVersion: helm.cattle.io/v1
 kind: HelmChart
 metadata:
@@ -14,6 +19,7 @@ spec:
   chart: nats
   version: 2.15.0
   targetNamespace: nats
+  createNamespace: true
   valuesContent: |-
     config:
       cluster:

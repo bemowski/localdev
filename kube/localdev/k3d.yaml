@@ -17,8 +17,13 @@ volumes:
   - volume: ${LOCALDEV_ROOT}/runtime.data:/runtime.data   # e.g. postgres -> /runtime.data/postgres
     nodeFilters:
       - server:0
-  # Grafana provisions dashboards from here, live (see manifests/20-infra/20-2-monitoring.yaml)
-  - volume: ${LOCALDEV_ROOT}/grafana/dashboards:/grafana-dashboards
+  # The repo, read-only, so the profile's links (runtime.profile/, see profile.py) resolve inside
+  # the cluster: k3s follows the absolute dir links (same path as on the host); Grafana reads its
+  # relative file links under /localdev.
+  - volume: ${LOCALDEV_ROOT}:${LOCALDEV_ROOT}:ro
+    nodeFilters:
+      - server:0
+  - volume: ${LOCALDEV_ROOT}:/localdev:ro
     nodeFilters:
       - server:0
 registries:

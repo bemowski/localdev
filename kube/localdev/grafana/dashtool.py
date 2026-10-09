@@ -7,7 +7,8 @@ tree, the running Grafana and grafana.com:
 
   list                         dashboards in Grafana (folder, uid, title, file-provisioned?)
   export <uid|search> [folder] Grafana -> grafana/dashboards/<folder>/<slug>.json
-                               (default: the file it's provisioned from; "root" = top level)
+                               (default: the file it's provisioned from; "root" = top level;
+                               "component:<name>" = components/<name>/dashboards)
   import <file|dir> [folder]   JSON file(s) -> grafana/dashboards/<folder>/ (normalized)
   fetch <gnet-id> <folder>     grafana.com dashboard -> grafana/dashboards/<folder>/
   check                        validate the tree: JSON parses, every dashboard has a unique uid
@@ -27,7 +28,14 @@ import urllib.parse
 import urllib.request
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parent / "dashboards"
+ROOT = Path(__file__).resolve().parent / "dashboards"          # always-on dashboards
+BASE = ROOT.parent.parent                                        # kube/localdev
+COMPONENTS = BASE / "components"                                 # components/<name>/dashboards
+
+
+def all_dashboard_files():
+    """Every dashboard file: grafana/dashboards/** and components/*/dashboards/*."""
+    return sorted(ROOT.rglob("*.json")) + sorted(COMPONENTS.glob("*/dashboards/*.json"))
 FOLDERS = ("platform", "infra", "tools", "apps")
 GRAFANA_URL = os.environ.get("GRAFANA_URL", "http://localhost:13000/grafana").rstrip("/")
 AUTH_HEADER = {"X-Auth-Request-Email": os.environ.get("GRAFANA_USER", "dashtool@localdev")}
@@ -73,27 +81,33 @@ def normalize(dash, fallback_uid=None):
 
 
 def provisioned_file(uid):
-    """The file under ROOT a dashboard uid is provisioned from, if any."""
-    for f in ROOT.rglob("*.json"):
+    """The file a dashboard uid is provisioned from (grafana/dashboards or a component), if any."""
+    for f in all_dashboard_files():
         if json.loads(f.read_text()).get("uid") == uid:
             return f
     return None
 
 
 def write(dash, folder, out=None):
+    if folder.startswith("component:"):   # a tool's own dashboards: components/<name>/dashboards
+        name = folder.split(":", 1)[1]
+        if not (COMPONENTS / name / "manifests").is_dir():
+            die(f"no component '{name}' (components/{name}/manifests missing)")
+        out = out or COMPONENTS / name / "dashboards" / f"{slug(dash.get('title', dash['uid']))}.json"
+        folder = "."
     if folder == "root":       # top level of the tree = Grafana's root "Dashboards" list
         folder = "."
     if folder not in FOLDERS + (".",):
         print(f"  note: '{folder}' is not one of {FOLDERS}; it becomes its own Grafana folder")
     out = out or ROOT / folder / f"{slug(dash.get('title', dash['uid']))}.json"
     # Grafana can't provision two files with one uid: a dashboard lives in exactly one place
-    for other in ROOT.rglob("*.json"):
+    for other in all_dashboard_files():
         if other.resolve() != out.resolve() and json.loads(other.read_text()).get("uid") == dash["uid"]:
-            die(f"uid {dash['uid']} is already provisioned from {other.relative_to(ROOT)}; "
+            die(f"uid {dash['uid']} is already provisioned from {other.relative_to(BASE)}; "
                 f"move that file instead, or change the uid in the source to keep a copy")
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(json.dumps(dash, indent=2, ensure_ascii=False) + "\n")
-    print(f"  wrote {out.relative_to(ROOT.parent.parent)}  (uid {dash['uid']})")
+    print(f"  wrote {out.relative_to(BASE.parent)}  (uid {dash['uid']})")
     return out
 
 
@@ -156,9 +170,9 @@ def cmd_fetch(args):
 
 def cmd_check(_args):
     seen, problems = {}, []
-    files = sorted(ROOT.rglob("*.json"))
+    files = all_dashboard_files()
     for f in files:
-        rel = f.relative_to(ROOT)
+        rel = f.relative_to(BASE)
         try:
             uid = json.loads(f.read_text()).get("uid")
         except json.JSONDecodeError as e:

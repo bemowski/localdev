@@ -1,5 +1,5 @@
 # kube/localdev — ephemeral local kubernetes (k3d)
-#   cluster:  mise run cluster:create | cluster:status | cluster:destroy | cluster:recreate | cluster:secrets | cluster:clean
+#   cluster:  mise run cluster:create [profile] | cluster:profile [profile] | cluster:status | cluster:destroy | cluster:recreate | cluster:secrets | cluster:clean
 #   apps/tools: mise run build <app> | pg:forward | pg:psql | kn:forward | keycloak:apply | keycloak:export
 #   mise run grafana:list | grafana:export | grafana:import | grafana:fetch   (see grafana/dashtool.py)
 #   see readme.md
@@ -17,22 +17,27 @@ KUBECONFIG = "{{config_root}}/.kubeconfig"   # never touch ~/.kube/config
 LOCALDEV_ROOT = "{{config_root}}"            # expanded in k3d.yaml (absolute host paths)
 
 [tasks."cluster:create"]
-description = "Create the localdev k3d cluster and bootstrap secrets"
+description = "Create the localdev k3d cluster with a profile (default: last used, else profiles.toml default)"
+usage = 'arg "[profile]" help="lite | dev | knative | full (see profiles.toml)"'
 run = """#!/bin/bash
 set -euo pipefail
 
 mise run cluster:secrets:check
 
+# the active view k3s and Grafana read: runtime.profile/ (links into manifests/, components/)
+python3 profile.py link ${usage_profile:-}
+
 # persistent host data (see k3d.yaml); create as us, not as root via docker
 mkdir -p runtime.data/registry
 
 k3d cluster create --config k3d.yaml \
-    --volume "{{config_root}}/manifests:/var/lib/rancher/k3s/server/manifests/localdev@server:0"
+    --volume "{{config_root}}/runtime.profile/manifests:/var/lib/rancher/k3s/server/manifests/localdev@server:0"
 
 k3d kubeconfig get "$CLUSTER_NAME" > "$KUBECONFIG"
 chmod 600 "$KUBECONFIG"
 
 mise run cluster:secrets
+mise run cluster:profile:sync
 
 echo "Waiting for traefik..."
 until kubectl -n kube-system get deploy traefik >/dev/null 2>&1; do sleep 2; done
@@ -40,7 +45,8 @@ kubectl -n kube-system rollout status deploy/traefik --timeout=180s
 
 for app in apps/*/; do mise run build "$(basename "$app")"; done
 
-mise run keycloak:apply
+if python3 profile.py enabled keycloak; then mise run keycloak:apply; fi
+echo "cluster ready - profile $(python3 profile.py current): $(tr '\n' ' ' < runtime.profile/components)"
 """
 
 [tasks."cluster:secrets:check"]
@@ -64,7 +70,7 @@ set -euo pipefail
 mise run cluster:secrets:check
 set -a; source secrets.env; set +a
 apply() { kubectl apply -f - >/dev/null && echo "  $1"; }
-for ns in auth monitoring keycloak; do
+for ns in auth monitoring; do
     kubectl create namespace $ns --dry-run=client -o yaml | kubectl apply -f - >/dev/null
 done
 kubectl -n auth create secret generic oauth2-proxy \
@@ -80,10 +86,13 @@ kubectl -n auth create secret generic oauth2-proxy-htpasswd --from-literal=users
 kubectl -n monitoring create secret generic grafana-admin \
     --from-literal=admin-user=admin --from-literal=admin-password="$LOCAL_ADMIN_PASSWORD" \
     --dry-run=client -o yaml | apply "monitoring/grafana-admin"
-# Keycloak's bootstrap admin (master realm) = the same admin
+# Keycloak's bootstrap admin (master realm) = the same admin (only when keycloak is in the profile)
+if python3 profile.py enabled keycloak; then
+kubectl create namespace keycloak --dry-run=client -o yaml | kubectl apply -f - >/dev/null
 kubectl -n keycloak create secret generic keycloak-admin \
     --from-literal=username=admin --from-literal=password="$LOCAL_ADMIN_PASSWORD" \
     --dry-run=client -o yaml | apply "keycloak/keycloak-admin"
+fi
 # pods read these at startup: restart the ones that already exist (no-op on a fresh cluster)
 kubectl -n auth rollout restart deploy/oauth2-proxy >/dev/null 2>&1 && echo "  restarted oauth2-proxy" || true
 """
@@ -116,11 +125,13 @@ rm -f "$KUBECONFIG"
 
 [tasks."cluster:recreate"]
 description = "Destroy then create"
-run = ["mise run cluster:destroy", "mise run cluster:create"]
+usage = 'arg "[profile]"'
+run = ["mise run cluster:destroy", "mise run cluster:create ${usage_profile:-}"]
 
 [tasks."cluster:status"]
-description = "Show cluster, nodes, helm install jobs and ingresses"
+description = "Show profile, cluster, nodes, helm install jobs and ingresses"
 run = """#!/bin/bash
+echo "profile: $(python3 profile.py current)  components: $(tr '\n' ' ' < runtime.profile/components 2>/dev/null)"
 k3d cluster list
 kubectl get nodes -o wide
 kubectl get helmcharts -A
@@ -186,7 +197,7 @@ python3 grafana/dashtool.py list
 description = "Save a Grafana dashboard to grafana/dashboards/<folder>/ (default: its Grafana folder, else apps)"
 usage = '''
 arg "<dashboard>" help="uid or title search"
-arg "[folder]" help="platform | infra | tools | apps | root | <new folder> (default: where its file already is)"
+arg "[folder]" help="platform | infra | apps | root | component:<name> | <new folder> (default: where its file already is)"
 '''
 run = """#!/bin/bash
 set -euo pipefail
@@ -194,6 +205,7 @@ kubectl -n monitoring port-forward svc/grafana 13000:80 >/dev/null 2>&1 & pf=$!
 trap 'kill $pf' EXIT
 until curl -sf -o /dev/null http://localhost:13000/grafana/api/health; do sleep 0.3; done
 python3 grafana/dashtool.py export "$usage_dashboard" ${usage_folder:-}
+python3 profile.py link >/dev/null   # new files must be linked into runtime.profile/ to appear
 """
 
 [tasks."grafana:import"]
@@ -203,7 +215,7 @@ arg "<path>" help="a .json file or a directory of them"
 arg "[folder]" default="apps"
 '''
 dir = "{{cwd}}"   # resolve <path> from where you ran mise
-run = 'python3 "{{config_root}}/grafana/dashtool.py" import "$usage_path" "$usage_folder"'
+run = 'python3 "{{config_root}}/grafana/dashtool.py" import "$usage_path" "$usage_folder" && python3 "{{config_root}}/profile.py" link >/dev/null'
 
 [tasks."grafana:fetch"]
 description = "Download a grafana.com dashboard into grafana/dashboards/<folder>/"
@@ -211,7 +223,7 @@ usage = '''
 arg "<id>" help="grafana.com dashboard id"
 arg "<folder>"
 '''
-run = 'python3 grafana/dashtool.py fetch "$usage_id" "$usage_folder"'
+run = 'python3 grafana/dashtool.py fetch "$usage_id" "$usage_folder" && python3 profile.py link >/dev/null'
 
 # --- knative (internal-only: services are reachable in-cluster at <svc>.<ns>.svc.cluster.local) ---
 
@@ -236,10 +248,13 @@ run = "python3 grafana/dashtool.py check"
 description = "Apply keycloak/realms/*.json to Keycloak (keycloak-config-cli Job; idempotent)"
 run = """#!/bin/bash
 set -euo pipefail
+kubectl create namespace keycloak --dry-run=client -o yaml | kubectl apply -f - >/dev/null
 kubectl -n keycloak create configmap keycloak-realms --from-file=keycloak/realms/ \
     --dry-run=client -o yaml | kubectl apply -f - >/dev/null
 echo "Waiting for Keycloak..."
-kubectl -n keycloak rollout status deploy/keycloak --timeout=300s
+# after a profile switch k3s may not have created it yet (and it waits for postgres)
+for i in $(seq 150); do kubectl -n keycloak get deploy keycloak >/dev/null 2>&1 && break; sleep 2; done
+kubectl -n keycloak rollout status deploy/keycloak --timeout=400s
 kubectl -n keycloak delete job keycloak-config --ignore-not-found >/dev/null
 kubectl apply -f - >/dev/null <<'EOF'
 apiVersion: batch/v1
@@ -285,4 +300,52 @@ kubectl -n keycloak port-forward svc/keycloak 18180:8080 >/dev/null 2>&1 & pf=$!
 trap 'kill $pf' EXIT
 until curl -sf -o /dev/null http://localhost:18180/keycloak/realms/master; do sleep 0.5; done
 KEYCLOAK_URL=http://localhost:18180/keycloak python3 keycloak/realmtool.py export "$usage_realm"
+"""
+
+# --- profiles (profiles.toml + profile.py; active view in runtime.profile/) ------------------
+
+[tasks."cluster:profile"]
+description = "List profiles, or switch the running cluster to one (adds/removes tools live)"
+usage = 'arg "[profile]"'
+run = """#!/bin/bash
+set -euo pipefail
+if [ -z "${usage_profile:-}" ]; then python3 profile.py list; exit 0; fi
+to="$usage_profile"
+echo "profile: $(python3 profile.py current) -> $to"
+python3 profile.py link "$to"          # additions deploy by themselves (k3s + Grafana follow the links)
+# uninstall components that are deployed (AddOn exists) but not in the new profile. k3s never
+# deletes objects when their files disappear. Re-running finishes a partial switch.
+addons=$(kubectl -n kube-system get addon -o jsonpath='{.items[*].metadata.name}')
+removed=$(python3 profile.py removed "$to" $addons)
+failed=0
+while IFS=$'\t' read -r comp file; do
+    [ -n "$comp" ] || continue
+    echo "  - $comp: $(basename "$file")"
+    # resources first (operators finalize their CRs while the namespace still exists) ...
+    yq 'select(.kind != "Namespace")' "$file" | kubectl delete -f - --ignore-not-found --wait --timeout=600s 2>&1 \
+        | sed 's/^/      /' || failed=1
+    # ... then the namespaces the file owns
+    for ns in $(yq 'select(.kind == "Namespace") | .metadata.name' "$file" | grep -v '^---'); do
+        kubectl delete namespace "$ns" --ignore-not-found --wait --timeout=600s 2>&1 | sed 's/^/      /' || failed=1
+    done
+    kubectl -n kube-system delete addon "$(basename "$file" | sed -E 's/\\.ya?ml$//')" --ignore-not-found >/dev/null
+done <<< "$removed"
+# k3s skips a file whose path+mtime it has seen before - even if we deleted its objects since -
+# so give re-added components' manifests a fresh mtime (content and git are unaffected)
+missing=$(python3 profile.py missing $(kubectl -n kube-system get addon -o jsonpath='{.items[*].metadata.name}'))
+if [ -n "$missing" ]; then touch $missing; fi
+mise run cluster:profile:sync
+if python3 profile.py enabled keycloak; then mise run cluster:secrets >/dev/null; mise run keycloak:apply; fi
+echo "profile $to active: $(tr '\n' ' ' < runtime.profile/components)"
+if [ "$failed" = 1 ]; then echo "some deletions timed out - re-run 'mise run cluster:profile $to' to finish" >&2; exit 1; fi
+"""
+
+[tasks."cluster:profile:sync"]
+description = "Publish the enabled components to cnav (ConfigMap localdev-profile)"
+hide = true
+run = """#!/bin/bash
+set -euo pipefail
+kubectl create namespace cnav --dry-run=client -o yaml | kubectl apply -f - >/dev/null
+kubectl -n cnav create configmap localdev-profile --from-file=components=runtime.profile/components \
+    --from-literal=profile="$(python3 profile.py current)" --dry-run=client -o yaml | kubectl apply -f - >/dev/null
 """

@@ -9,6 +9,11 @@
 #
 # Fixed dev credentials: app / localdev, database app. Local only.
 apiVersion: v1
+kind: Namespace
+metadata:
+  name: pg
+---
+apiVersion: v1
 kind: Secret
 metadata:
   name: postgres-app

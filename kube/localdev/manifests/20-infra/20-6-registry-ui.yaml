@@ -1,6 +1,11 @@
 # Registry UI (joxit/docker-registry-ui) at /registry/ — browses the k3d registry
 # (localdev-registry container, see k3d.yaml). Behind SSO, read-only.
 # The UI's own nginx proxies /v2 to the registry, so the browser never talks to it directly.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: registry
+---
 apiVersion: apps/v1
 kind: Deployment
 metadata:

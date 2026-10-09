@@ -11,6 +11,11 @@
 # Secrets auth/oauth2-proxy and auth/oauth2-proxy-htpasswd come from `mise run cluster:secrets`.
 # Local (htpasswd) sessions have no email: the allow-list doesn't apply to them, and apps
 # keyed on the email header (Grafana) show their own login instead.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: auth
+---
 apiVersion: helm.cattle.io/v1
 kind: HelmChart
 metadata:
@@ -21,6 +26,7 @@ spec:
   chart: oauth2-proxy
   version: 10.7.1
   targetNamespace: auth
+  createNamespace: true
   valuesContent: |-
     config:
       existingSecret: oauth2-proxy

@@ -2,6 +2,11 @@
 # Image: apps/cnav (Python), built and pushed by `mise run build cnav`.
 # Edit cards.yaml / status.yaml below; the page picks them up within ~a minute, no rebuild.
 apiVersion: v1
+kind: Namespace
+metadata:
+  name: cnav
+---
+apiVersion: v1
 kind: ConfigMap
 metadata:
   name: cnav-config
@@ -25,14 +30,17 @@ data:
       link: /registry/
       description: Images in the localdev registry
     - component: pgweb
+      tool: postgres
       icon: 🐘
       link: /pgweb/
       description: Postgres (pg/postgres-rw), app database
     - component: NATS
+      tool: nats
       icon: 📨
       link: /nats/
       description: "NUI: subjects, JetStream streams, KV"
     - component: Keycloak
+      tool: keycloak
       icon: 🔐
       link: /keycloak/admin/
       description: Identity provider for apps (realm localdev)
@@ -42,7 +50,8 @@ data:
       description: SSO test app, echoes request headers
   # Groups -> items -> checks; an item's light is the worst of its checks.
   # kinds: Deployment | StatefulSet | DaemonSet (namespace, name) | HelmChart (name)
-  # optional per item: namespace (display override for the prefix), link
+  # optional per item: namespace (display override for the prefix), link,
+  #   tool: <component> (shown only when that component is in the cluster's profile)
   status.yaml: |
     - group: platform
       items:
@@ -96,31 +105,39 @@ data:
     - group: tools
       items:
         - name: Postgres
+          tool: postgres
           checks:
             - {kind: StatefulSet, namespace: pg, name: postgres}
         - name: pgweb
+          tool: postgres
           checks:
             - {kind: Deployment, namespace: pg, name: pgweb}
         - name: NATS
+          tool: nats
           checks:
             - {kind: StatefulSet, namespace: nats, name: nats}
             - {kind: HelmChart, name: nats}
         - name: NUI
+          tool: nats
           checks:
             - {kind: Deployment, namespace: nats, name: nui}
         - name: nats-box
+          tool: nats
           checks:
             - {kind: Deployment, namespace: nats, name: nats-box}
         - name: Keycloak
+          tool: keycloak
           checks:
             - {kind: Deployment, namespace: keycloak, name: keycloak}
         - name: Knative operator
+          tool: knative
           namespace: kn-operator     # display only; real ns knative-operator
           checks:
             - {kind: Deployment, namespace: knative-operator, name: knative-operator}
             - {kind: Deployment, namespace: knative-operator, name: operator-webhook}
             - {kind: HelmChart, name: knative-operator}
         - name: Knative Serving
+          tool: knative
           namespace: kn-serving     # display only; real ns knative-serving
           checks:
             - {kind: Deployment, namespace: knative-serving, name: activator}
@@ -130,6 +147,7 @@ data:
             - {kind: Deployment, namespace: knative-serving, name: net-kourier-controller}
             - {kind: Deployment, namespace: knative-serving, name: 3scale-kourier-gateway}
         - name: Knative Eventing
+          tool: knative
           namespace: kn-eventing     # display only; real ns knative-eventing
           checks:
             - {kind: Deployment, namespace: knative-eventing, name: eventing-controller}
@@ -219,10 +237,14 @@ spec:
           volumeMounts:
             - name: config
               mountPath: /etc/cnav   # whole dir (not subPath) so ConfigMap edits propagate
+            - name: profile
+              mountPath: /etc/localdev-profile
       volumes:
         - name: config
           configMap:
             name: cnav-config
+        - name: profile        # enabled components (cluster:create / cluster:profile); optional
+          configMap: {name: localdev-profile, optional: true}
 ---
 apiVersion: v1
 kind: Service

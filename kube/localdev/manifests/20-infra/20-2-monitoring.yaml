@@ -1,6 +1,11 @@
 # kube-prometheus-stack at /grafana, /prometheus, /alertmanager — all behind SSO.
 # Grafana trusts the X-Auth-Request-Email header from oauth2-proxy (no second login).
 # No persistence: data lives as long as the cluster.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: monitoring
+---
 apiVersion: helm.cattle.io/v1
 kind: HelmChart
 metadata:
@@ -11,6 +16,7 @@ spec:
   chart: kube-prometheus-stack
   version: 92.1.0
   targetNamespace: monitoring
+  createNamespace: true
   timeout: 10m
   valuesContent: |-
     fullnameOverride: kps
@@ -30,18 +36,18 @@ spec:
       admin:
         existingSecret: grafana-admin     # from `mise run cluster:secrets` (admin / LOCAL_ADMIN_PASSWORD)
       defaultDashboardsEnabled: false   # copies live in grafana/dashboards/{platform,infra}
-      # Dashboards come from grafana/dashboards/<folder>/*.json in the repo (mounted into the
-      # server node at /grafana-dashboards by k3d.yaml): one Grafana folder per directory,
-      # reloaded every 10s. The chart's built-in dashboards were copied into that tree, so
-      # they're switched off here.
+      # Dashboards come from the active profile's view, runtime.profile/dashboards/ (links into
+      # grafana/dashboards/ and components/*/dashboards/, see profile.py), read through the repo
+      # mount at /localdev: one Grafana folder per directory, reloaded every 15s. The chart's
+      # built-in dashboards were copied into grafana/dashboards, so they're switched off here.
       nodeSelector:
         node-role.kubernetes.io/control-plane: "true"
       extraVolumes:
-        - name: localdev-dashboards
-          hostPath: {path: /grafana-dashboards, type: Directory}
+        - name: localdev-repo
+          hostPath: {path: /localdev, type: Directory}
       extraVolumeMounts:
-        - name: localdev-dashboards
-          mountPath: /var/lib/grafana/dashboards/localdev
+        - name: localdev-repo
+          mountPath: /localdev
           readOnly: true
       dashboardProviders:
         dashboardproviders.yaml:
@@ -51,9 +57,10 @@ spec:
               type: file
               folder: ""
               allowUiUpdates: true          # edit in the UI, then `mise run grafana:export`
-              updateIntervalSeconds: 10
+              updateIntervalSeconds: 15     # >10 = polling (re-reads files); <=10 uses fsnotify,
+                                            # which never fires for edits to link targets
               options:
-                path: /var/lib/grafana/dashboards/localdev
+                path: /localdev/runtime.profile/dashboards
                 foldersFromFilesStructure: true
       serviceMonitor:
         path: /grafana/metrics   # serve_from_sub_path redirects /metrics to root_url

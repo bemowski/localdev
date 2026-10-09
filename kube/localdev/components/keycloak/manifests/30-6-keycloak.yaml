@@ -10,6 +10,11 @@
 # Data: database "keycloak" on pg/postgres (runtime.data), created by the init container.
 # Secret keycloak-admin comes from `mise run cluster:secrets`.
 apiVersion: v1
+kind: Namespace
+metadata:
+  name: keycloak
+---
+apiVersion: v1
 kind: Secret
 metadata:
   name: keycloak-db

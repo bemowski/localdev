@@ -10,6 +10,16 @@
 # later without touching apps).
 #
 # Metrics + traces go out as OTLP to Alloy -> Prometheus / Tempo, like any other app.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: knative-serving
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: knative-eventing
+---
 apiVersion: operator.knative.dev/v1beta1
 kind: KnativeServing
 metadata:

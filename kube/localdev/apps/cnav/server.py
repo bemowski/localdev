@@ -19,6 +19,24 @@ import yaml
 
 STATIC_DIR = Path(os.environ.get("CNAV_STATIC", "/app/static"))
 CONFIG_DIR = Path(os.environ.get("CNAV_CONFIG", "/etc/cnav"))
+# enabled optional components of the cluster's profile (ConfigMap localdev-profile, written by the
+# cluster:create / cluster:profile tasks). Missing file = show everything.
+PROFILE_FILE = Path(os.environ.get("CNAV_PROFILE", "/etc/localdev-profile/components"))
+
+
+def enabled_components():
+    try:
+        return set(PROFILE_FILE.read_text().split())
+    except OSError:
+        return None
+
+
+def for_profile(items):
+    """Drop cards/status items tagged `tool: <component>` whose component isn't in the profile."""
+    enabled = enabled_components()
+    if enabled is None:
+        return items
+    return [i for i in items if not isinstance(i, dict) or not i.get("tool") or i["tool"] in enabled]
 PORT = int(os.environ.get("CNAV_LISTEN_PORT", "8080"))  # not CNAV_PORT: k8s injects that for Service "cnav"
 HEADLAMP = os.environ.get("CNAV_HEADLAMP", "/headlamp/c/main")
 
@@ -237,6 +255,9 @@ def node_memory(kube):
 
 def status():
     config = yaml.safe_load((CONFIG_DIR / "status.yaml").read_text()) or []
+    for g in config:
+        g["items"] = for_profile(g.get("items", []))
+    config = [g for g in config if g["items"]]
     kube = Kube()
     groups = []
     for g in config:
@@ -247,6 +268,7 @@ def status():
     node_used, node_alloc = node_memory(kube)
     return {
         "updated": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        "components": sorted(enabled_components() or []),
         "mem": sum(g["mem"] for g in groups),
         "node_mem": node_used,
         "node_alloc": node_alloc,
@@ -288,6 +310,9 @@ class Handler(SimpleHTTPRequestHandler):
         if path in ("/cards.yaml", "/status.yaml"):
             f = CONFIG_DIR / path.lstrip("/")
             data = f.read_bytes()
+            if path == "/cards.yaml":   # only cards for tools in the cluster's profile
+                cards = yaml.safe_load(data) or []
+                data = yaml.safe_dump(for_profile(cards), sort_keys=False, allow_unicode=True).encode()
             self.send_response(200)
             self.send_header("Content-Type", "text/yaml; charset=utf-8")
             self.send_header("Cache-Control", "no-store")

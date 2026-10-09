@@ -1,4 +1,9 @@
 # Headlamp at /headlamp, behind SSO. No token needed (uses its own SA).
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: headlamp
+---
 apiVersion: helm.cattle.io/v1
 kind: HelmChart
 metadata:
@@ -9,6 +14,7 @@ spec:
   chart: headlamp
   version: 0.45.0
   targetNamespace: headlamp
+  createNamespace: true
   valuesContent: |-
     fullnameOverride: headlamp
     config:

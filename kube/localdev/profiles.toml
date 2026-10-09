@@ -1,0 +1,20 @@
+# Optional tools for a localdev cluster. Each component is a folder in components/:
+#   components/<name>/manifests/    deployed by k3s
+#   components/<name>/dashboards/   shown in Grafana's "tools" folder
+# platform, infra and apps (manifests/, grafana/dashboards/) are always deployed.
+#
+#   mise run cluster:create [profile]   create with a profile (default below, or the last one used)
+#   mise run cluster:profile            list profiles
+#   mise run cluster:profile <profile>  switch a running cluster (adds/removes tools live)
+
+default = "dev"
+
+[profiles]
+lite    = { description = "Core only: SSO, observability, registry, cnav", components = [] }
+dev     = { description = "App development: Postgres + NATS", components = ["postgres", "nats"] }
+knative = { description = "Serverless and eventing", components = ["postgres", "nats", "knative"] }
+full    = { description = "Everything", components = ["postgres", "nats", "knative", "keycloak"] }
+
+# Extra component metadata. Components themselves are discovered from components/*/.
+[components.keycloak]
+requires = ["postgres"]        # auto-included whenever keycloak is enabled

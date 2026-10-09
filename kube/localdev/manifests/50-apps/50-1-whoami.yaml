@@ -1,4 +1,9 @@
 # SSO test app at /whoami — echoes request headers (look for X-Auth-Request-Email)
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: demo
+---
 apiVersion: apps/v1
 kind: Deployment
 metadata:

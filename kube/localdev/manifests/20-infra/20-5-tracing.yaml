@@ -13,6 +13,7 @@ spec:
   chart: tempo
   version: 3.1.0
   targetNamespace: monitoring
+  createNamespace: true
   valuesContent: |-
     fullnameOverride: tempo
     tempo:
