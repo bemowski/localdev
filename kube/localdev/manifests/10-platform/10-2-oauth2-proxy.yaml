@@ -1,4 +1,10 @@
-# oauth2-proxy: one SSO gate for every app (Traefik forwardAuth -> /oauth2/auth).
+# oauth2-proxy: one SSO gate for every app. Each namespace's "sso" Middleware is a Traefik
+# forwardAuth to oauth2-proxy's ROOT ("/", upstream static://202):
+#   signed in  -> 202 + X-Auth-Request-* headers, request continues to the app
+#   signed out -> browsers get the sign-in page (rd from X-Forwarded-*), fetch/XHR a 401
+# The app's own 401s pass through untouched. (An earlier errors-middleware design turned ANY
+# 401, e.g. Grafana's background token rotation, into the sign-in page - which clears the
+# session cookie.)
 # Two ways to sign in, on one page:
 #   - Google, for accounts in the allow-list below (authenticatedEmailsFile)
 #   - local user "admin" (htpasswd), password LOCAL_ADMIN_PASSWORD from secrets.env
@@ -57,20 +63,3 @@ spec:
                 name: oauth2-proxy
                 port:
                   number: 80
----
-# Shared: when forwardAuth says 401 (not signed in), answer with oauth2-proxy's sign-in page
-# (Google button + admin form; rd = the URL you asked for). The status stays 401: browsers
-# render the page, fetch()/XHR callers get a clean 401 (a 302 would need a Location header).
-# Must come BEFORE the app's forwardAuth middleware in the chain.
-apiVersion: traefik.io/v1alpha1
-kind: Middleware
-metadata:
-  name: auth-errors
-  namespace: auth
-spec:
-  errors:
-    status: ["401"]
-    service:
-      name: oauth2-proxy
-      port: 80
-    query: /oauth2/sign_in?rd={url}

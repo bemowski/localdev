@@ -1,3 +1,4 @@
 .kubeconfig
 secrets.env
+secrets
 runtime.data/

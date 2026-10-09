@@ -49,7 +49,7 @@ metadata:
   namespace: registry
 spec:
   forwardAuth:
-    address: http://oauth2-proxy.auth.svc.cluster.local/oauth2/auth   # allow-list: 10-2-oauth2-proxy.yaml
+    address: http://oauth2-proxy.auth.svc.cluster.local/   # signed in: 202 + identity headers; signed out: sign-in page (allow-list: 10-2-oauth2-proxy.yaml)
     authResponseHeaders: [X-Auth-Request-Email, X-Auth-Request-User]
 ---
 # /registry -> /registry/ so the UI's relative asset paths resolve under the prefix
@@ -78,7 +78,7 @@ metadata:
   name: registry-ui
   namespace: registry
   annotations:
-    traefik.ingress.kubernetes.io/router.middlewares: auth-auth-errors@kubernetescrd,registry-sso@kubernetescrd,registry-slash@kubernetescrd,registry-strip@kubernetescrd
+    traefik.ingress.kubernetes.io/router.middlewares: registry-sso@kubernetescrd,registry-slash@kubernetescrd,registry-strip@kubernetescrd
 spec:
   rules:
     - http:

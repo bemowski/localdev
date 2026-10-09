@@ -235,7 +235,7 @@ metadata:
   namespace: cnav
 spec:
   forwardAuth:
-    address: http://oauth2-proxy.auth.svc.cluster.local/oauth2/auth   # allow-list: 10-2-oauth2-proxy.yaml
+    address: http://oauth2-proxy.auth.svc.cluster.local/   # signed in: 202 + identity headers; signed out: sign-in page (allow-list: 10-2-oauth2-proxy.yaml)
     authResponseHeaders: [X-Auth-Request-Email, X-Auth-Request-User]
 ---
 apiVersion: networking.k8s.io/v1
@@ -244,7 +244,7 @@ metadata:
   name: cnav
   namespace: cnav
   annotations:
-    traefik.ingress.kubernetes.io/router.middlewares: auth-auth-errors@kubernetescrd,cnav-sso@kubernetescrd
+    traefik.ingress.kubernetes.io/router.middlewares: cnav-sso@kubernetescrd
 spec:
   rules:
     - http:

@@ -235,9 +235,9 @@
     })
     .catch(() => {});
 
-  // 401 = the SSO session ended while this page was open: reload, which shows the sign-in page
+  // 401/403 = the SSO session ended while this page was open: reload, which shows the sign-in page
   function checkAuth(r) {
-    if (r.status === 401) { location.reload(); throw new Error('signed out'); }
+    if (r.status === 401 || r.status === 403) { location.reload(); throw new Error('signed out'); }
     return r;
   }
 

@@ -109,7 +109,7 @@ metadata:
   namespace: nats
 spec:
   forwardAuth:
-    address: http://oauth2-proxy.auth.svc.cluster.local/oauth2/auth   # allow-list: 10-2-oauth2-proxy.yaml
+    address: http://oauth2-proxy.auth.svc.cluster.local/   # signed in: 202 + identity headers; signed out: sign-in page (allow-list: 10-2-oauth2-proxy.yaml)
     authResponseHeaders: [X-Auth-Request-Email, X-Auth-Request-User]
 ---
 # /nats -> /nats/ so NUI's relative asset, ./api/ and websocket paths resolve under the prefix
@@ -138,7 +138,7 @@ metadata:
   name: nui
   namespace: nats
   annotations:
-    traefik.ingress.kubernetes.io/router.middlewares: auth-auth-errors@kubernetescrd,nats-sso@kubernetescrd,nats-slash@kubernetescrd,nats-strip@kubernetescrd
+    traefik.ingress.kubernetes.io/router.middlewares: nats-sso@kubernetescrd,nats-slash@kubernetescrd,nats-strip@kubernetescrd
 spec:
   rules:
     - http:
