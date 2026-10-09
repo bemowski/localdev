@@ -27,7 +27,7 @@ data:
     - component: pgweb
       icon: 🐘
       link: /pgweb/
-      description: Postgres (tools/postgres-rw), app database
+      description: Postgres (pg/postgres-rw), app database
     - component: NATS
       icon: 📨
       link: /nats/
@@ -89,23 +89,23 @@ data:
       items:
         - name: Registry UI
           checks:
-            - {kind: Deployment, namespace: tools, name: registry-ui}
+            - {kind: Deployment, namespace: registry, name: registry-ui}
         - name: Postgres
           checks:
-            - {kind: StatefulSet, namespace: tools, name: postgres}
+            - {kind: StatefulSet, namespace: pg, name: postgres}
         - name: pgweb
           checks:
-            - {kind: Deployment, namespace: tools, name: pgweb}
+            - {kind: Deployment, namespace: pg, name: pgweb}
         - name: NATS
           checks:
-            - {kind: StatefulSet, namespace: tools, name: nats}
+            - {kind: StatefulSet, namespace: nats, name: nats}
             - {kind: HelmChart, name: nats}
         - name: NUI
           checks:
-            - {kind: Deployment, namespace: tools, name: nui}
+            - {kind: Deployment, namespace: nats, name: nui}
         - name: nats-box
           checks:
-            - {kind: Deployment, namespace: tools, name: nats-box}
+            - {kind: Deployment, namespace: nats, name: nats-box}
     - group: apps
       items:
         - name: whoami

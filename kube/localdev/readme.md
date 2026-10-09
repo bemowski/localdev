@@ -55,7 +55,7 @@ manifests/
   00-namespaces.yaml
   10-platform/  10-1-traefik-config  10-2-oauth2-proxy
   20-infra/     20-1-headlamp  20-2-monitoring  20-3-logging  20-4-scrape  20-5-tracing
-  30-tools/     30-1-registry-ui  30-2-postgres  30-3-nats
+  30-tools/     30-1-registry-ui (ns registry)  30-2-postgres (ns pg)  30-3-nats (ns nats)
   50-apps/      50-1-whoami  50-2-cnav
 ```
 - Subfolders work at any depth.
@@ -159,20 +159,20 @@ The OpenTelemetry Operator (zero-code auto-instrumentation through a pod annotat
 
 ## Postgres
 
-Postgres 18 is a single-instance StatefulSet in `tools` (`manifests/30-tools/30-2-postgres.yaml`), with no operator.
+Postgres 18 is a single-instance StatefulSet in namespace `pg` (`manifests/30-tools/30-2-postgres.yaml`), with no operator.
 - **Credentials** (fixed, dev only): user `app`, password `localdev`, database `app`.
-- **In-cluster connection:** host `postgres-rw.tools.svc:5432`. The Secret `postgres-app` has the keys `username`, `password`, `dbname`, `host`, `port`, `uri` and `jdbc-uri`.
+- **In-cluster connection:** host `postgres-rw.pg.svc:5432`. The Secret `postgres-app` has the keys `username`, `password`, `dbname`, `host`, `port`, `uri` and `jdbc-uri`.
 - **From your desktop:** run `mise run pg:forward`, then connect to `postgresql://app:localdev@localhost:5432/app`.
 - **Web UI:** `/pgweb/`.
 - **Later move to CloudNativePG:** the Service and Secret names match what CloudNativePG creates for a `Cluster` named `postgres`, so apps won't need changes. Data moves with `pg_dump` and `pg_restore`.
 
 ## NATS
 
-NATS 2.15 runs as a single server with JetStream in `tools` (`manifests/30-tools/30-3-nats.yaml`, official `nats` chart).
-- **Client URL:** `nats://nats.tools.svc:4222`, with no auth (local only).
-- **Monitoring endpoint:** `http://nats.tools.svc:8222` (`/varz`, `/connz`, `/subsz`, `/jsz`).
+NATS 2.15 runs as a single server with JetStream in namespace `nats` (`manifests/30-tools/30-3-nats.yaml`, official `nats` chart).
+- **Client URL:** `nats://nats.nats.svc:4222`, with no auth (local only).
+- **Monitoring endpoint:** `http://nats.nats.svc:8222` (`/varz`, `/connz`, `/subsz`, `/jsz`).
 - **Web UI:** NUI at `/nats/`. It's preloaded with a `localdev` connection from the `nui-contexts` ConfigMap. Open the connection, then use Messages to subscribe to a subject or wildcard (`demo.>`, `>`) and watch traffic live.
-- **CLI:** `kubectl -n tools exec -it deploy/nats-box -- nats sub '>'`, or `nats stream ls`, `nats pub demo.x hi`.
+- **CLI:** `kubectl -n nats exec -it deploy/nats-box -- nats sub '>'`, or `nats stream ls`, `nats pub demo.x hi`.
 - **Metrics:** an exporter sidecar plus a PodMonitor, so Prometheus scrapes NATS automatically. Metric names start with `nats_`, e.g. `nats_varz_in_msgs`.
 
 ## Apps (`apps/`)

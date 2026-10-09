@@ -123,13 +123,13 @@ usage = 'arg "[port]" default="5432"'
 raw = true
 run = """#!/bin/bash
 echo "postgresql://app:localdev@localhost:${usage_port}/app   (Ctrl-C to stop)"
-kubectl -n tools port-forward svc/postgres-rw "${usage_port}:5432"
+kubectl -n pg port-forward svc/postgres-rw "${usage_port}:5432"
 """
 
 [tasks."pg:psql"]
 description = "psql shell in the postgres pod (as app, db app)"
 raw = true
-run = "kubectl -n tools exec -it statefulset/postgres -- psql -U app app"
+run = "kubectl -n pg exec -it statefulset/postgres -- psql -U app app"
 
 # --- grafana dashboards (grafana/dashboards/<folder>/*.json, provisioned live) ---------
 # list/export talk to Grafana through a temporary port-forward; import/fetch only write files.

@@ -1,7 +1,7 @@
-# NATS 2.15, single server with JetStream, in tools.
-#   client:      nats://nats.tools.svc:4222       (no auth; local only)
-#   monitoring:  http://nats.tools.svc:8222        (/varz /connz /subsz /jsz)
-#   CLI:         kubectl -n tools exec -it deploy/nats-box -- nats sub '>'
+# NATS 2.15, single server with JetStream, in namespace nats.
+#   client:      nats://nats.nats.svc:4222       (no auth; local only)
+#   monitoring:  http://nats.nats.svc:8222        (/varz /connz /subsz /jsz)
+#   CLI:         kubectl -n nats exec -it deploy/nats-box -- nats sub '>'
 #   UI:          NUI at /nats/ (behind SSO), preloaded with a "localdev" connection
 # JetStream data lives in runtime.data/nats (like postgres), so streams survive recreate.
 apiVersion: helm.cattle.io/v1
@@ -13,7 +13,7 @@ spec:
   repo: https://nats-io.github.io/k8s/helm/charts/
   chart: nats
   version: 2.15.0
-  targetNamespace: tools
+  targetNamespace: nats
   valuesContent: |-
     config:
       cluster:
@@ -53,17 +53,17 @@ apiVersion: v1
 kind: ConfigMap
 metadata:
   name: nui-contexts
-  namespace: tools
+  namespace: nats
 data:
   # a nats CLI context; NUI imports every file in --nats-cli-contexts at startup
   localdev.json: |
-    {"description": "localdev NATS (tools/nats)", "url": "nats://nats.tools.svc:4222"}
+    {"description": "localdev NATS (nats/nats)", "url": "nats://nats.nats.svc:4222"}
 ---
 apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: nui
-  namespace: tools
+  namespace: nats
   labels: {app: nui}
 spec:
   replicas: 1
@@ -95,19 +95,29 @@ apiVersion: v1
 kind: Service
 metadata:
   name: nui
-  namespace: tools
+  namespace: nats
 spec:
   selector: {app: nui}
   ports:
     - port: 80
       targetPort: 31311
 ---
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  name: sso
+  namespace: nats
+spec:
+  forwardAuth:
+    address: http://oauth2-proxy.auth.svc.cluster.local/oauth2/auth?allowed_emails=bemowski@gmail.com
+    authResponseHeaders: [X-Auth-Request-Email, X-Auth-Request-User]
+---
 # /nats -> /nats/ so NUI's relative asset, ./api/ and websocket paths resolve under the prefix
 apiVersion: traefik.io/v1alpha1
 kind: Middleware
 metadata:
-  name: nats-slash
-  namespace: tools
+  name: slash
+  namespace: nats
 spec:
   redirectRegex:
     regex: ^(https?://[^/]+/nats)$
@@ -116,8 +126,8 @@ spec:
 apiVersion: traefik.io/v1alpha1
 kind: Middleware
 metadata:
-  name: nats-strip
-  namespace: tools
+  name: strip
+  namespace: nats
 spec:
   stripPrefix:
     prefixes: [/nats]
@@ -126,9 +136,9 @@ apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
   name: nui
-  namespace: tools
+  namespace: nats
   annotations:
-    traefik.ingress.kubernetes.io/router.middlewares: auth-auth-errors@kubernetescrd,tools-sso@kubernetescrd,tools-nats-slash@kubernetescrd,tools-nats-strip@kubernetescrd
+    traefik.ingress.kubernetes.io/router.middlewares: auth-auth-errors@kubernetescrd,nats-sso@kubernetescrd,nats-slash@kubernetescrd,nats-strip@kubernetescrd
 spec:
   rules:
     - http:

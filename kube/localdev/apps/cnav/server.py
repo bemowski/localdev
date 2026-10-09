@@ -205,10 +205,14 @@ def evaluate_item(kube, item):
         results.append(r)
 
     worst = max(results, key=lambda r: RANK[r["state"]], default=result("amber", "no checks"))
+    # namespace(s) of the item's workloads (HelmChart checks live in kube-system; not shown)
+    namespaces = list(dict.fromkeys(c["namespace"] for c in item.get("checks", [])
+                                    if c.get("kind") in WORKLOADS and c.get("namespace")))
     counted = [r for r in results if r["desired"] is not None]
     mems = [r["mem"] for r in results if r["mem"] is not None]
     return {
         "name": item.get("name", "?"),
+        "namespace": item.get("namespace", ",".join(namespaces)),
         "state": worst["state"],
         "reason": worst["reason"],
         "ready": sum(r["ready"] for r in counted) if counted else None,

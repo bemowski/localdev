@@ -26,4 +26,14 @@ metadata:
 apiVersion: v1
 kind: Namespace
 metadata:
-  name: tools
+  name: registry
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: pg
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: nats

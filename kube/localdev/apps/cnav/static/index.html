@@ -147,6 +147,8 @@
   }
   a.row:hover { background: var(--panel); }
   .row-name { font-size: 14px; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .row-name .ns { color: var(--muted); font-weight: 400; font: 12px ui-monospace, SFMono-Regular, Menlo, monospace; }
+  .row-name .ns::after { content: " / "; opacity: .6; }
   .count { color: var(--muted); font: 12px ui-monospace, SFMono-Regular, Menlo, monospace; }
   .reason { grid-column: 2 / 4; font-size: 12px; color: var(--muted); line-height: 1.35; }
   .reason.red { color: var(--red-text); }
@@ -265,7 +267,10 @@
         if (i.link) row.href = i.link;
         row.title = [i.link && `Open ${i.name} in Headlamp`, i.mem != null && `memory ${fmtMem(i.mem)}`]
           .filter(Boolean).join(' · ');
-        row.append(el('span', `dot ${i.state}`), el('span', 'row-name', i.name),
+        const name = el('span', 'row-name');
+        if (i.namespace) name.append(el('span', 'ns', i.namespace));
+        name.append(document.createTextNode(i.name));
+        row.append(el('span', `dot ${i.state}`), name,
                    el('span', 'count', i.desired != null ? `${i.ready}/${i.desired}` : ''));
         if (i.state !== 'green' && i.reason) row.append(el('div', `reason ${i.state}`, i.reason));
         rows.append(row);

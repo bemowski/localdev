@@ -5,7 +5,7 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: registry-ui
-  namespace: tools
+  namespace: registry
   labels: {app: registry-ui}
 spec:
   replicas: 1
@@ -36,7 +36,7 @@ apiVersion: v1
 kind: Service
 metadata:
   name: registry-ui
-  namespace: tools
+  namespace: registry
 spec:
   selector: {app: registry-ui}
   ports:
@@ -46,7 +46,7 @@ apiVersion: traefik.io/v1alpha1
 kind: Middleware
 metadata:
   name: sso
-  namespace: tools
+  namespace: registry
 spec:
   forwardAuth:
     address: http://oauth2-proxy.auth.svc.cluster.local/oauth2/auth?allowed_emails=bemowski@gmail.com
@@ -56,8 +56,8 @@ spec:
 apiVersion: traefik.io/v1alpha1
 kind: Middleware
 metadata:
-  name: registry-slash
-  namespace: tools
+  name: slash
+  namespace: registry
 spec:
   redirectRegex:
     regex: ^(https?://[^/]+/registry)$
@@ -66,8 +66,8 @@ spec:
 apiVersion: traefik.io/v1alpha1
 kind: Middleware
 metadata:
-  name: registry-strip
-  namespace: tools
+  name: strip
+  namespace: registry
 spec:
   stripPrefix:
     prefixes: [/registry]
@@ -76,9 +76,9 @@ apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
   name: registry-ui
-  namespace: tools
+  namespace: registry
   annotations:
-    traefik.ingress.kubernetes.io/router.middlewares: auth-auth-errors@kubernetescrd,tools-sso@kubernetescrd,tools-registry-slash@kubernetescrd,tools-registry-strip@kubernetescrd
+    traefik.ingress.kubernetes.io/router.middlewares: auth-auth-errors@kubernetescrd,registry-sso@kubernetescrd,registry-slash@kubernetescrd,registry-strip@kubernetescrd
 spec:
   rules:
     - http:
