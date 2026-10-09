@@ -38,6 +38,7 @@ data:
       description: SSO test app, echoes request headers
   # Groups -> items -> checks; an item's light is the worst of its checks.
   # kinds: Deployment | StatefulSet | DaemonSet (namespace, name) | HelmChart (name)
+  # optional per item: namespace (display override for the prefix), link
   status.yaml: |
     - group: platform
       items:
@@ -106,6 +107,31 @@ data:
         - name: nats-box
           checks:
             - {kind: Deployment, namespace: nats, name: nats-box}
+        - name: Knative operator
+          namespace: kn-operator     # display only; real ns knative-operator
+          checks:
+            - {kind: Deployment, namespace: knative-operator, name: knative-operator}
+            - {kind: Deployment, namespace: knative-operator, name: operator-webhook}
+            - {kind: HelmChart, name: knative-operator}
+        - name: Knative Serving
+          namespace: kn-serving     # display only; real ns knative-serving
+          checks:
+            - {kind: Deployment, namespace: knative-serving, name: activator}
+            - {kind: Deployment, namespace: knative-serving, name: autoscaler}
+            - {kind: Deployment, namespace: knative-serving, name: controller}
+            - {kind: Deployment, namespace: knative-serving, name: webhook}
+            - {kind: Deployment, namespace: knative-serving, name: net-kourier-controller}
+            - {kind: Deployment, namespace: knative-serving, name: 3scale-kourier-gateway}
+        - name: Knative Eventing
+          namespace: kn-eventing     # display only; real ns knative-eventing
+          checks:
+            - {kind: Deployment, namespace: knative-eventing, name: eventing-controller}
+            - {kind: Deployment, namespace: knative-eventing, name: eventing-webhook}
+            - {kind: Deployment, namespace: knative-eventing, name: imc-controller}
+            - {kind: Deployment, namespace: knative-eventing, name: imc-dispatcher}
+            - {kind: Deployment, namespace: knative-eventing, name: mt-broker-controller}
+            - {kind: Deployment, namespace: knative-eventing, name: mt-broker-filter}
+            - {kind: Deployment, namespace: knative-eventing, name: mt-broker-ingress}
     - group: apps
       items:
         - name: whoami
@@ -140,7 +166,10 @@ rules:
     resources: [helmcharts]
     verbs: [get]
   - apiGroups: ["metrics.k8s.io"]     # memory rollups (metrics-server)
-    resources: [pods]
+    resources: [pods, nodes]
+    verbs: [get, list]
+  - apiGroups: [""]                   # node allocatable memory (header tooltip)
+    resources: [nodes]
     verbs: [get, list]
 ---
 apiVersion: rbac.authorization.k8s.io/v1

@@ -1,0 +1,13 @@
+# Knative Operator: installs and upgrades Knative Serving/Eventing from the
+# KnativeServing / KnativeEventing resources in 30-5-knative.yaml.
+# Upgrading Knative = bumping this chart version (operator vX.Y deploys Knative X.Y).
+apiVersion: helm.cattle.io/v1
+kind: HelmChart
+metadata:
+  name: knative-operator
+  namespace: kube-system
+spec:
+  repo: https://knative.github.io/operator
+  chart: knative-operator
+  version: v1.23.1
+  targetNamespace: knative-operator

@@ -1,0 +1,73 @@
+# Knative Serving + Eventing, managed by the operator (30-4-knative-operator.yaml).
+# Needs the operator's CRDs: on a fresh cluster k3s retries this file until they exist.
+#
+# INTERNAL ONLY: every Knative Service is cluster-local (domain svc.cluster.local), reachable
+# from other pods at http://<svc>.<ns>.svc.cluster.local - nothing is exposed via Traefik.
+# Kourier is the networking layer, ClusterIP only (a LoadBalancer would fight Traefik for :80).
+#
+# Eventing: multi-tenant channel-based Broker backed by the in-memory channel (events are
+# lost if the dispatcher restarts - fine for local dev; swap the channel to NATS JetStream
+# later without touching apps).
+#
+# Metrics + traces go out as OTLP to Alloy -> Prometheus / Tempo, like any other app.
+apiVersion: operator.knative.dev/v1beta1
+kind: KnativeServing
+metadata:
+  name: knative-serving
+  namespace: knative-serving
+spec:
+  version: "1.23"
+  high-availability:
+    replicas: 1
+  ingress:
+    kourier:
+      enabled: true
+      service-type: ClusterIP
+  config:
+    network:
+      ingress-class: kourier.ingress.networking.knative.dev
+    domain:
+      svc.cluster.local: ""          # cluster-local by default, no external URLs
+    autoscaler:
+      scale-to-zero-grace-period: 30s
+    observability:
+      metrics-protocol: http/protobuf
+      metrics-endpoint: http://alloy.monitoring.svc:4318/v1/metrics
+      metrics-export-interval: 30s
+      request-metrics-protocol: http/protobuf
+      request-metrics-endpoint: http://alloy.monitoring.svc:4318/v1/metrics
+      request-metrics-export-interval: 30s
+      tracing-protocol: http/protobuf
+      tracing-endpoint: http://alloy.monitoring.svc:4318/v1/traces
+      tracing-sampling-rate: "1"
+---
+apiVersion: operator.knative.dev/v1beta1
+kind: KnativeEventing
+metadata:
+  name: knative-eventing
+  namespace: knative-eventing
+spec:
+  version: "1.23"
+  high-availability:
+    replicas: 1
+  config:
+    default-ch-webhook:
+      default-ch-config: |
+        clusterDefault:
+          apiVersion: messaging.knative.dev/v1
+          kind: InMemoryChannel
+    config-br-defaults:
+      default-br-config: |
+        clusterDefault:
+          brokerClass: MTChannelBasedBroker
+          apiVersion: v1
+          kind: ConfigMap
+          name: config-br-default-channel
+          namespace: knative-eventing
+    observability:
+      metrics-protocol: http/protobuf
+      metrics-endpoint: http://alloy.monitoring.svc:4318/v1/metrics
+      metrics-export-interval: 30s
+      tracing-protocol: http/protobuf
+      tracing-endpoint: http://alloy.monitoring.svc:4318/v1/traces
+      tracing-sampling-rate: "1"

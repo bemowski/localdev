@@ -40,6 +40,7 @@ mise run recreate
 mise run build cnav  # rebuild apps/cnav, push to the local registry, restart it
 mise run pg:forward  # postgres on localhost:5432 (pass a port to change it)
 mise run pg:psql     # psql shell in the postgres pod
+mise run kn:forward  # Knative internal gateway on localhost:8081 (call with a Host header)
 mise run clean       # delete runtime.data (asks first; cluster must be destroyed)
 mise run grafana:list                    # dashboards in Grafana
 mise run grafana:export "<title|uid>"    # Grafana UI -> grafana/dashboards/<folder>/
@@ -56,6 +57,7 @@ manifests/
   10-platform/  10-1-traefik-config  10-2-oauth2-proxy
   20-infra/     20-1-headlamp  20-2-monitoring  20-3-logging  20-4-scrape  20-5-tracing
   30-tools/     30-1-registry-ui (ns registry)  30-2-postgres (ns pg)  30-3-nats (ns nats)
+                30-4-knative-operator  30-5-knative (ns knative-*)
   50-apps/      50-1-whoami  50-2-cnav
 ```
 - Subfolders work at any depth.
@@ -78,7 +80,7 @@ Dashboards are files: `grafana/dashboards/<folder>/*.json`. The folder is mounte
 |---|---|
 | `platform/` | Traefik (requests, latency and errors per Ingress), oauth2-proxy (SSO checks, 401s and 403s), CoreDNS, API server, kubelet, cluster compute |
 | `infra/` | Kubernetes compute and networking by namespace, workload and pod; node exporter; Prometheus; Alertmanager; Grafana; Loki & Alloy health; Logs overview (filter by namespace and app, regex search); OpenTelemetry services (rate, errors, duration, service graph, traces) |
-| `tools/` | Postgres (9628), Postgres top queries (pg_stat_statements), NATS server (2279), NATS JetStream (14725), Docker registry (9621) |
+| `tools/` | Postgres (9628), Postgres top queries (pg_stat_statements), NATS server (2279), NATS JetStream (14725), Docker registry (9621), Knative (Serving autoscaling, requests, event deliveries) |
 | `apps/` | yours |
 
 **Developer workflow:**
@@ -175,6 +177,41 @@ NATS 2.15 runs as a single server with JetStream in namespace `nats` (`manifests
 - **CLI:** `kubectl -n nats exec -it deploy/nats-box -- nats sub '>'`, or `nats stream ls`, `nats pub demo.x hi`.
 - **Metrics:** an exporter sidecar plus a PodMonitor, so Prometheus scrapes NATS automatically. Metric names start with `nats_`, e.g. `nats_varz_in_msgs`.
 
+## Knative (Serving + Eventing, internal only)
+
+Knative 1.23 is installed by the **Knative Operator** (`30-4-knative-operator.yaml`) from the `KnativeServing` and `KnativeEventing` resources in `30-5-knative.yaml`. To upgrade, bump the operator chart version and the `version:` in those two resources.
+
+**Internal only.**
+- Every Knative Service gets a cluster-local URL, `http://<svc>.<ns>.svc.cluster.local`.
+- Nothing is exposed through Traefik.
+- Kourier, the networking layer, is ClusterIP only.
+
+From your desktop, run `mise run kn:forward`, then `curl -H 'Host: hello.demo.svc.cluster.local' localhost:8081`. (A Knative Service's Kubernetes Service is an ExternalName, so you can't port-forward to it directly.)
+
+To expose one later, add a wildcard `*.knative.localhost` route to Kourier and remove the service's cluster-local visibility. That's one rule, with no per-service config.
+
+**Serving:**
+- `kn service create`, or a `serving.knative.dev/v1` `Service`. You get revisions, traffic splitting and autoscaling.
+- Services **scale to zero** about 90 seconds after the last request: a 60-second window plus a 30-second grace period. A cold start takes about 0.6 seconds for a small Go service.
+
+**Eventing:**
+- The Broker class is `MTChannelBasedBroker`, backed by the **in-memory channel**. Events are lost if the dispatcher restarts, which is fine for dev.
+- Create a Broker in a namespace, then Triggers that filter on CloudEvent attributes (`type`, `source`, and so on) and deliver to a Knative Service or any addressable.
+- Producers POST CloudEvents to `http://broker-ingress.knative-eventing.svc.cluster.local/<ns>/<broker>`.
+
+**Examples** (`examples/knative/`, not auto-applied):
+- `hello.yaml` is a Knative Service.
+- `eventing.yaml` is a Broker, an `event-display` consumer and a Trigger. Its header has a curl command for sending a test event.
+
+**Observability:**
+- Knative exports its own metrics and traces as OTLP to Alloy.
+- Metrics (`kn_revision_*`, `kn_eventing_dispatch_*`, and request metrics per service) go to Prometheus, and appear on the **Knative** dashboard (`tools/`).
+- Traces (`activator → <service>`, `broker.ingress → <consumer>`) go to Tempo.
+
+**CLI:** `kn` is installed by mise. Try `kn service list -A`, `kn broker list -n demo`, `kn trigger list -n demo`.
+
+**UI:** Knative has no web UI of its own. Headlamp shows Knative's custom resources generically, under Custom Resources. Headlamp's Knative plugin is beta and covers Serving only, and isn't installed.
+
 ## Apps (`apps/`)
 
 Each `apps/<name>/` directory holds a Dockerfile. `mise run build <name>` builds it as `localhost:5005/<name>:latest`, pushes it to the k3d registry and restarts any deployment labelled `app=<name>`. Inside the cluster, the image is pulled as `localdev-registry:5005/<name>:latest`. `mise run create` builds every app.
@@ -188,7 +225,9 @@ Each `apps/<name>/` directory holds a Dockerfile. `mise run build <name>` builds
   - **Editing:** both files live in the `cnav-config` ConfigMap. Edit them there and the page picks up the change within about a minute, with no rebuild. The copies in `apps/cnav/` are only defaults for running the image on its own, where the status column shows "unavailable".
   - **Header:** shows who you're signed in as (from oauth2-proxy's `/oauth2/userinfo`) and a **Log out** button. Logging out ends the SSO session and lands on `/signed-out`, the only cnav page outside SSO. Your Google session stays signed in.
   - **Cards:** the ↗ icon on each card opens its link in a new tab.
-  - **Memory:** working-set memory from metrics-server, summed per row, per group (in the group header) and for the cluster (beside the "Status" title). Hover a row to see its own figure. Only workloads listed in `status.yaml` are counted.
+  - **Memory:** working-set memory from metrics-server, summed per row, per group (in the group header) and for the cluster. Hover a row to see its own figure.
+    - The header shows **`pods`**, the sum for workloads listed in `status.yaml`, and **`node`**, the whole node(s), which is what Headlamp shows.
+    - The node figure is roughly twice the pods figure because it also includes the `k3s server` process (API server, controllers, kubelet and the SQLite datastore, all outside any pod, about 1.5 GiB), containerd, kernel memory and active file cache.
   - **Access:** the `cnav-status` ClusterRole gives read-only access to workloads, pods, jobs, HelmCharts and pod metrics.
 
 ## Google OAuth client (one-time setup)

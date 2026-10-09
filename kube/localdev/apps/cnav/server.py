@@ -222,6 +222,19 @@ def evaluate_item(kube, item):
     }
 
 
+def node_memory(kube):
+    """(working-set bytes, allocatable bytes) summed over nodes; (None, None) if unavailable.
+    Unlike the pod sums, this includes k3s itself, containerd, kernel and active file cache."""
+    try:
+        used = sum(quantity_bytes(n["usage"]["memory"])
+                   for n in (kube.get("/apis/metrics.k8s.io/v1beta1/nodes") or {}).get("items", []))
+        alloc = sum(quantity_bytes(n["status"]["allocatable"]["memory"])
+                    for n in (kube.get("/api/v1/nodes") or {}).get("items", []))
+        return used or None, alloc or None
+    except Exception:
+        return None, None
+
+
 def status():
     config = yaml.safe_load((CONFIG_DIR / "status.yaml").read_text()) or []
     kube = Kube()
@@ -231,9 +244,12 @@ def status():
         state = max((i["state"] for i in items), key=RANK.get, default="green")
         mem = sum(i["mem"] for i in items if i["mem"] is not None)
         groups.append({"group": g.get("group", "?"), "state": state, "mem": mem, "items": items})
+    node_used, node_alloc = node_memory(kube)
     return {
         "updated": datetime.now(timezone.utc).isoformat(timespec="seconds"),
         "mem": sum(g["mem"] for g in groups),
+        "node_mem": node_used,
+        "node_alloc": node_alloc,
         "groups": groups,
     }
 

@@ -1,0 +1,39 @@
+# Knative Eventing: a Broker, a consumer (Knative Service) and a Trigger routing one event type.
+#   kubectl apply -f examples/knative/eventing.yaml
+#   send an event (from any pod, e.g. kubectl -n nats exec -it deploy/nats-box -- sh):
+#     curl -X POST http://broker-ingress.knative-eventing.svc.cluster.local/demo/default \
+#       -H 'Ce-Id: order-42' -H 'Ce-Specversion: 1.0' -H 'Ce-Type: dev.localdev.order.created' \
+#       -H 'Ce-Source: localdev/test' -H 'Content-Type: application/json' -d '{"order":42}'
+#   see it arrive:  kubectl -n demo logs -l serving.knative.dev/service=event-display -c user-container
+apiVersion: eventing.knative.dev/v1
+kind: Broker
+metadata:
+  name: default
+  namespace: demo
+---
+apiVersion: serving.knative.dev/v1
+kind: Service
+metadata:
+  name: event-display
+  namespace: demo
+spec:
+  template:
+    spec:
+      containers:
+        - image: gcr.io/knative-releases/knative.dev/eventing/cmd/event_display
+---
+apiVersion: eventing.knative.dev/v1
+kind: Trigger
+metadata:
+  name: demo-orders
+  namespace: demo
+spec:
+  broker: default
+  filter:
+    attributes:
+      type: dev.localdev.order.created
+  subscriber:
+    ref:
+      apiVersion: serving.knative.dev/v1
+      kind: Service
+      name: event-display

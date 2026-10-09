@@ -8,6 +8,7 @@ k3d = '5.9.0'
 kubectl = '1.37.1'   # overrides root 1.27
 helm = '4.3.0'
 k9s = '0.51.0'
+kn = 'knative-v1.23.0'   # Knative CLI (kn service create/list, kn broker, kn trigger)
 
 [env]
 CLUSTER_NAME = "localdev"
@@ -174,3 +175,16 @@ arg "<id>" help="grafana.com dashboard id"
 arg "<folder>"
 '''
 run = 'python3 grafana/dashtool.py fetch "$usage_id" "$usage_folder"'
+
+# --- knative (internal-only: services are reachable in-cluster at <svc>.<ns>.svc.cluster.local) ---
+
+[tasks."kn:forward"]
+description = "Port-forward Knative's internal gateway to localhost:8081; call services with a Host header"
+usage = 'arg "[port]" default="8081"'
+raw = true
+run = """#!/bin/bash
+echo "Knative internal gateway on localhost:${usage_port}. Call a service with its cluster-local host, e.g.:"
+echo "  curl -H 'Host: hello.demo.svc.cluster.local' http://localhost:${usage_port}/"
+echo "Services: $(kubectl get ksvc -A -o jsonpath='{range .items[*]}{.metadata.name}.{.metadata.namespace} {end}')"
+kubectl -n knative-serving port-forward svc/kourier-internal "${usage_port}:80"
+"""

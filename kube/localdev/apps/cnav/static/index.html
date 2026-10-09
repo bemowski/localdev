@@ -111,6 +111,7 @@
   aside h2 { font-size: 16px; margin: 0; }
   .total { font: 600 13px ui-monospace, SFMono-Regular, Menlo, monospace; }
   .total-label { color: var(--muted); font: 12px system-ui, sans-serif; margin-right: 4px; }
+  .total-sep { color: var(--muted); margin: 0 6px; }
   .updated { color: var(--muted); font-size: 12px; margin-bottom: 18px; }
 
   .group {
@@ -254,7 +255,14 @@
     const box = document.getElementById('status');
     box.replaceChildren();
     const total = document.getElementById('total');
-    total.replaceChildren(el('span', 'total-label', 'memory'), document.createTextNode(fmtMem(data.mem)));
+    total.replaceChildren(el('span', 'total-label', 'pods'), document.createTextNode(fmtMem(data.mem)));
+    total.title = 'pods: working-set memory of the workloads listed below (sum of the groups)';
+    if (data.node_mem != null) {
+      total.append(el('span', 'total-sep', '·'), el('span', 'total-label', 'node'),
+                   document.createTextNode(fmtMem(data.node_mem)));
+      total.title += `\nnode: the whole node(s), ${fmtMem(data.node_mem)} of ${fmtMem(data.node_alloc)} allocatable. ` +
+        'Includes the k3s server process (API server, controllers, kubelet), containerd, kernel and active file cache.';
+    }
     for (const g of data.groups) {
       const group = el('section', `group ${g.state}`);
       const head = el('div', 'group-head');
