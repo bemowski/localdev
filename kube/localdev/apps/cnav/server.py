@@ -260,6 +260,13 @@ class Handler(SimpleHTTPRequestHandler):
     def __init__(self, *a, **kw):
         super().__init__(*a, directory=str(STATIC_DIR), **kw)
 
+    no_store = False
+
+    def end_headers(self):
+        if self.no_store:
+            self.send_header("Cache-Control", "no-store")
+        super().end_headers()
+
     def send_json(self, code, body):
         data = json.dumps(body).encode()
         self.send_response(code)
@@ -288,6 +295,8 @@ class Handler(SimpleHTTPRequestHandler):
             self.end_headers()
             self.wfile.write(data)
             return
+        if path in ("/", "/index.html") or not (STATIC_DIR / path.lstrip("/")).is_file():
+            self.no_store = True   # the page must always go through SSO, never come from cache
         if path == "/signed-out":
             self.path = "/signed-out.html"  # landing page after /oauth2/sign_out (outside SSO)
         elif not (STATIC_DIR / path.lstrip("/")).is_file():

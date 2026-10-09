@@ -218,3 +218,7 @@ echo "  curl -H 'Host: hello.demo.svc.cluster.local' http://localhost:${usage_po
 echo "Services: $(kubectl get ksvc -A -o jsonpath='{range .items[*]}{.metadata.name}.{.metadata.namespace} {end}')"
 kubectl -n knative-serving port-forward svc/kourier-internal "${usage_port}:80"
 """
+
+[tasks."grafana:check"]
+description = "Validate grafana/dashboards: JSON parses, uids unique (a duplicate freezes provisioning)"
+run = "python3 grafana/dashtool.py check"

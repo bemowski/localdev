@@ -47,6 +47,7 @@ mise run grafana:list                    # dashboards in Grafana
 mise run grafana:export "<title|uid>"    # Grafana UI -> grafana/dashboards/<folder>/
 mise run grafana:import <file|dir> [folder]
 mise run grafana:fetch <grafana.com id> <folder>
+mise run grafana:check                   # JSON valid + uids unique (a duplicate freezes ALL provisioning)
 k9s                  # uses ./.kubeconfig via mise env; ~/.kube/config is never touched
 ```
 
@@ -88,7 +89,7 @@ Dashboards are files: `grafana/dashboards/<folder>/*.json`. The folder is mounte
 | `infra/` | Kubernetes compute and networking by namespace, workload and pod; node exporter; Prometheus; Alertmanager; Grafana; Loki & Alloy health; OpenTelemetry services (rate, errors, duration, service graph, traces) |
 | `tools/` | Postgres (9628), Postgres top queries (pg_stat_statements), NATS server (2279), NATS JetStream (14725), Docker registry (9621), Knative (Serving autoscaling, requests, event deliveries) |
 | `apps/` | yours |
-| *(root)* `logs.json` | **Logs**, top level in Grafana: pod stdout **and** OpenTelemetry logs. Filter by namespace, app/service, **Sources** (tick pod stdout and/or OpenTelemetry) and regex search. Error lines: text match for stdout, severity for OTel. |
+| *(root)* `logs.json` | **Logs**, top level in Grafana: pod stdout **and** OpenTelemetry logs. Filter by namespace, app/service, **Sources** (tick pod stdout and/or OpenTelemetry), **Level** (Loki's `detected_level`, case-insensitive; synonyms grouped, e.g. warn/warning; `unknown` = no level in the line) and regex search. Error lines: text match for stdout, severity for OTel. |
 
 **Developer workflow:**
 1. Build or edit a dashboard in the Grafana UI. Provisioned dashboards can be edited and saved there.
@@ -106,6 +107,7 @@ The other tasks:
 **Notes:**
 - A dashboard saved in the UI but not exported lives only in Grafana's database, which is lost on `recreate`.
 - To remove a provisioned dashboard, delete its file.
+- **Every dashboard needs a unique `uid`.** If two files share one, Grafana stops applying **any** dashboard file changes (it only logs a warning). Run `mise run grafana:check` after copying files around.
 - The kube-prometheus-stack built-ins were copied into `platform/` and `infra/`, and the chart's own copies are turned off.
 
 ### App metrics convention

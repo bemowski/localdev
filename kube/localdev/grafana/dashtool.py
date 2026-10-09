@@ -10,6 +10,8 @@ tree, the running Grafana and grafana.com:
                                (default: the file it's provisioned from; "root" = top level)
   import <file|dir> [folder]   JSON file(s) -> grafana/dashboards/<folder>/ (normalized)
   fetch <gnet-id> <folder>     grafana.com dashboard -> grafana/dashboards/<folder>/
+  check                        validate the tree: JSON parses, every dashboard has a unique uid
+                               (one duplicate uid makes Grafana stop loading ALL file changes)
 
 Normalizing: drops the instance-specific "id", resolves grafana.com "__inputs"
 (${DS_PROMETHEUS}, ${DS_LOKI}, ...) to this cluster's datasource uids, keeps a stable uid.
@@ -152,7 +154,30 @@ def cmd_fetch(args):
     write(dash, folder)
 
 
-COMMANDS = {"list": cmd_list, "export": cmd_export, "import": cmd_import, "fetch": cmd_fetch}
+def cmd_check(_args):
+    seen, problems = {}, []
+    files = sorted(ROOT.rglob("*.json"))
+    for f in files:
+        rel = f.relative_to(ROOT)
+        try:
+            uid = json.loads(f.read_text()).get("uid")
+        except json.JSONDecodeError as e:
+            problems.append(f"{rel}: invalid JSON ({e})")
+            continue
+        if not uid:
+            problems.append(f"{rel}: no uid")
+        elif uid in seen:
+            problems.append(f"{rel}: uid {uid} duplicates {seen[uid]}")
+        else:
+            seen[uid] = rel
+    for msg in problems:
+        print(f"  {msg}")
+    if problems:
+        die(f"{len(problems)} problem(s) in {len(files)} dashboards")
+    print(f"  ok: {len(files)} dashboards, all uids unique")
+
+
+COMMANDS = {"check": cmd_check, "list": cmd_list, "export": cmd_export, "import": cmd_import, "fetch": cmd_fetch}
 
 if __name__ == "__main__":
     if len(sys.argv) < 2 or sys.argv[1] not in COMMANDS:

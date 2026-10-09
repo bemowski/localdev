@@ -235,7 +235,14 @@
     })
     .catch(() => {});
 
+  // 401 = the SSO session ended while this page was open: reload, which shows the sign-in page
+  function checkAuth(r) {
+    if (r.status === 401) { location.reload(); throw new Error('signed out'); }
+    return r;
+  }
+
   fetch('cards.yaml', { cache: 'no-store' })
+    .then(checkAuth)
     .then(r => { if (!r.ok) throw new Error(`cards.yaml: HTTP ${r.status}`); return r.text(); })
     .then(text => {
       const cards = jsyaml.load(text);
@@ -292,7 +299,7 @@
 
   async function refreshStatus() {
     try {
-      const r = await fetch('api/status', { cache: 'no-store' });
+      const r = checkAuth(await fetch('api/status', { cache: 'no-store' }));
       const data = await r.json();
       if (!r.ok) throw new Error(data.error || `HTTP ${r.status}`);
       renderStatus(data);

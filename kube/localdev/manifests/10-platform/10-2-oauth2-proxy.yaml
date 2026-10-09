@@ -58,7 +58,9 @@ spec:
                 port:
                   number: 80
 ---
-# Shared: turn a forwardAuth 401 into a redirect to the Google sign-in.
+# Shared: when forwardAuth says 401 (not signed in), answer with oauth2-proxy's sign-in page
+# (Google button + admin form; rd = the URL you asked for). The status stays 401: browsers
+# render the page, fetch()/XHR callers get a clean 401 (a 302 would need a Location header).
 # Must come BEFORE the app's forwardAuth middleware in the chain.
 apiVersion: traefik.io/v1alpha1
 kind: Middleware
@@ -68,8 +70,6 @@ metadata:
 spec:
   errors:
     status: ["401"]
-    statusRewrites:
-      "401": 302      # oauth2-proxy sets Location; without this browsers see a bare 401
     service:
       name: oauth2-proxy
       port: 80
