@@ -1,4 +1,5 @@
-# Cluster navigator cards. Fields: component, icon (emoji), link, description (optional)
+# Cluster navigator cards. Fields: component, icon (emoji), link, description (optional),
+#   links (optional): [{label, url}] shown as pills on the card, opening in a new tab
 - component: Headlamp
   icon: 🔦
   link: /headlamp/
@@ -23,6 +24,8 @@
   icon: 📨
   link: /nats/
   description: "NUI: subjects, JetStream streams, KV"
+  links:
+    - {label: docs, url: https://docs.nats.io/concepts/pub-sub-basics}
 - component: Keycloak
   icon: 🔐
   link: /keycloak/admin/

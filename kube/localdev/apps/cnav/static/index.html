@@ -86,6 +86,16 @@
   .card-wrap:hover a.flyout { opacity: 1; }
   a.flyout:hover, a.flyout:focus-visible { opacity: 1; color: var(--accent); background: var(--panel); outline: none; }
   a.flyout svg { width: 16px; height: 16px; }
+  /* per-card extra links ("links:" in cards.yaml): pills on the card's bottom row, new tab */
+  .pills {
+    position: absolute; right: 18px; bottom: 18px; max-width: 60%;
+    display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 6px;
+  }
+  a.pill {
+    font-size: 12px; line-height: 1; padding: 4px 10px; border-radius: 999px;
+    border: 1px solid var(--border); background: var(--panel); color: var(--muted); text-decoration: none;
+  }
+  a.pill:hover, a.pill:focus-visible { color: var(--accent); border-color: var(--accent); outline: none; }
   .icon { font-size: 56px; line-height: 1; margin-bottom: 10px; }
   .name { font-size: 17px; font-weight: 600; }
   .desc { color: var(--muted); font-size: 14px; }
@@ -242,6 +252,20 @@
       fly.title = fly.ariaLabel = `Open ${c.component} in a new tab`;
       fly.innerHTML = NEW_TAB_SVG;  // static markup, no config data
       wrap.append(a, fly);
+      // extra links as pills (siblings of the card link: links can't be nested)
+      const links = (c.links || []).filter(l => l && l.label && /^https?:\/\//.test(l.url || ''));
+      if (links.length) {
+        const pills = el('div', 'pills');
+        for (const l of links) {
+          const pill = el('a', 'pill', l.label);
+          pill.href = l.url;
+          pill.target = '_blank';
+          pill.rel = 'noopener';
+          pill.title = l.url;
+          pills.append(pill);
+        }
+        wrap.append(pills);
+      }
       grid.append(wrap);
     }
   }

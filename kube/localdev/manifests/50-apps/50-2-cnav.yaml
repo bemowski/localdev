@@ -39,6 +39,8 @@ data:
       icon: 📨
       link: /nats/
       description: "NUI: subjects, JetStream streams, KV"
+      links:
+        - {label: docs, url: https://docs.nats.io/concepts/pub-sub-basics}
     - component: Keycloak
       tool: keycloak
       icon: 🔐

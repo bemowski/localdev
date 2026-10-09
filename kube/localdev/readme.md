@@ -312,7 +312,7 @@ Keycloak 26 runs in namespace `keycloak` (`components/keycloak/manifests/30-6-ke
 Each `apps/<name>/` directory holds a Dockerfile. `mise run build <name>` builds it as `localhost:5005/<name>:latest`, pushes it to the k3d registry and restarts any deployment labelled `app=<name>`. Inside the cluster, the image is pulled as `localdev-registry:5005/<name>:latest`. `mise run cluster:create` builds every app.
 
 - **cnav** (`apps/cnav`, deployed by `manifests/50-apps/50-2-cnav.yaml`): a small Python server (stdlib plus PyYAML) serving the navigator page.
-  - **Cards (left):** from `cards.yaml`. Fields: `component`, `icon` (an emoji), `link`, and an optional `description`.
+  - **Cards (left):** from `cards.yaml`. Fields: `component`, `icon` (an emoji), `link`, an optional `description`, and optional `links`: a list of `{label, url}` shown as pill buttons on the card's bottom row, each opening in a new tab (e.g. a docs link).
   - **Status column (right):** from `status.yaml`. It's organised as groups, then items, then checks. Check kinds are `Deployment`, `StatefulSet` and `DaemonSet` (with `namespace` and `name`), and `HelmChart` (with `name`). An item's light is the worst of its checks, and a group's light is the worst of its items. Clicking a row opens the first workload in Headlamp. The column refreshes every 10 seconds.
     - **Green:** all replicas ready.
     - **Amber:** partially ready, a rollout in progress, starting up (under 2 minutes), restarted in the last 10 minutes, Helm still installing, or scaled to 0.
