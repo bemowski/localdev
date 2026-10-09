@@ -379,7 +379,7 @@
       },
       "targets": [
         {
-          "expr": "{namespace=~\"$namespace\", service_name=~\"$service\", job=\"loki.source.kubernetes.pods\"} |~ \"$search\" | detected_level=~\"(?i)(${level:pipe})\" | label_format log_source=\"stdout\" | log_source=~\"${source:regex}\"",
+          "expr": "{namespace=~\"$namespace\", service_name=~\"$service\", job=\"loki.source.kubernetes.pods\"} |~ \"$search\" | detected_level=~\"(?i)(${level:pipe})\" | label_format log_source=\"stdout\" | log_source=~\"${source:regex}\" | line_format `{{ printf \"%-36s\" (print .namespace \"/\" .service_name) }} {{ __line__ }}`",
           "queryType": "range",
           "refId": "stdout",
           "datasource": {
@@ -388,7 +388,7 @@
           }
         },
         {
-          "expr": "{k8s_namespace_name=~\"$namespace\", service_name=~\"$service\"} |~ \"$search\" | detected_level=~\"(?i)(${level:pipe})\" | label_format log_source=\"otel\" | log_source=~\"${source:regex}\"",
+          "expr": "{k8s_namespace_name=~\"$namespace\", service_name=~\"$service\"} |~ \"$search\" | detected_level=~\"(?i)(${level:pipe})\" | label_format log_source=\"otel\" | log_source=~\"${source:regex}\" | line_format `{{ printf \"%-36s\" (print .k8s_namespace_name \"/\" .service_name) }} {{ __line__ }}`",
           "queryType": "range",
           "refId": "otel",
           "datasource": {

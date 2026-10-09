@@ -72,6 +72,9 @@ spec:
           header_name: X-Auth-Request-Email
           header_property: email
           auto_sign_up: true
+          # issue Grafana's own session token on proxy login: the frontend rotates that token in
+          # the background, and without one /api/user/auth-tokens/rotate 401s -> reload loop
+          enable_login_token: true
         users:
           auto_assign_org_role: Admin   # the SSO allow-list is the gate
       sidecar:
