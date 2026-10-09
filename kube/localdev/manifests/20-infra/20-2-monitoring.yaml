@@ -28,7 +28,7 @@ spec:
     grafana:
       fullnameOverride: grafana
       admin:
-        existingSecret: grafana-admin     # from `mise run secrets` (admin / LOCAL_ADMIN_PASSWORD)
+        existingSecret: grafana-admin     # from `mise run cluster:secrets` (admin / LOCAL_ADMIN_PASSWORD)
       defaultDashboardsEnabled: false   # copies live in grafana/dashboards/{platform,infra}
       # Dashboards come from grafana/dashboards/<folder>/*.json in the repo (mounted into the
       # server node at /grafana-dashboards by k3d.yaml): one Grafana folder per directory,

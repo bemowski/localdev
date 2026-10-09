@@ -2,7 +2,7 @@
 # Two ways to sign in, on one page:
 #   - Google, for accounts in the allow-list below (authenticatedEmailsFile)
 #   - local user "admin" (htpasswd), password LOCAL_ADMIN_PASSWORD from secrets.env
-# Secrets auth/oauth2-proxy and auth/oauth2-proxy-htpasswd come from `mise run secrets`.
+# Secrets auth/oauth2-proxy and auth/oauth2-proxy-htpasswd come from `mise run cluster:secrets`.
 # Local (htpasswd) sessions have no email: the allow-list doesn't apply to them, and apps
 # keyed on the email header (Grafana) show their own login instead.
 apiVersion: helm.cattle.io/v1

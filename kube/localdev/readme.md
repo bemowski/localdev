@@ -33,22 +33,26 @@ Ephemeral local Kubernetes (k3d) with path-based routing on `http://localhost/<a
 ## Usage
 
 ```bash
-mise run create      # create cluster, write .kubeconfig, load secrets, wait for traefik
-mise run status      # nodes, helm install jobs, ingresses
-mise run destroy     # delete cluster + .kubeconfig
-mise run secrets     # (re)load secrets.env into the cluster: Google client, admin login, Grafana admin
-mise run recreate
-mise run build cnav  # rebuild apps/cnav, push to the local registry, restart it
-mise run pg:forward  # postgres on localhost:5432 (pass a port to change it)
-mise run pg:psql     # psql shell in the postgres pod
-mise run kn:forward  # Knative internal gateway on localhost:8081 (call with a Host header)
-mise run clean       # delete runtime.data (asks first; cluster must be destroyed)
-mise run grafana:list                    # dashboards in Grafana
-mise run grafana:export "<title|uid>"    # Grafana UI -> grafana/dashboards/<folder>/
+# cluster lifecycle
+mise run cluster:create                     # create cluster, write .kubeconfig, load secrets, build apps
+mise run cluster:status                     # nodes, helm install jobs, ingresses
+mise run cluster:secrets                    # (re)load secrets.env into the cluster: Google client, admin login, Grafana admin
+mise run cluster:destroy                    # delete cluster + .kubeconfig (runtime.data is kept)
+mise run cluster:recreate                   # destroy + create
+mise run cluster:clean                      # delete runtime.data (asks first; cluster must be destroyed)
+
+# apps and tools
+mise run build cnav                         # rebuild apps/cnav, push to the local registry, restart it
+mise run pg:forward                         # postgres on localhost:5432 (pass a port to change it)
+mise run pg:psql                            # psql shell in the postgres pod
+mise run kn:forward                         # Knative internal gateway on localhost:8081 (call with a Host header)
+
+# grafana dashboards
+mise run grafana:list                       # dashboards in Grafana
+mise run grafana:export "<title|uid>"       # Grafana UI -> grafana/dashboards/<folder>/
 mise run grafana:import <file|dir> [folder]
 mise run grafana:fetch <grafana.com id> <folder>
-mise run grafana:check                   # JSON valid + uids unique (a duplicate freezes ALL provisioning)
-k9s                  # uses ./.kubeconfig via mise env; ~/.kube/config is never touched
+mise run grafana:check                      # JSON valid + uids unique (a duplicate freezes ALL provisioning)
 ```
 
 `manifests/` is mounted live into k3s's auto-deploy directory, so saving a file there re-applies it within seconds.
@@ -70,13 +74,13 @@ manifests/
 - Removing an object from a file deletes it from the cluster.
 - Changing a `HelmChart`'s `valuesContent` runs a Helm upgrade.
 - **Deleting a whole file does not delete its objects.** Remove them from the file first, or `kubectl delete` them.
-- Changes to `k3d.yaml` need `mise run recreate`. `runtime.data/` is kept across it. After editing `secrets.env`, run `mise run secrets`, which updates the running cluster.
+- Changes to `k3d.yaml` need `mise run cluster:recreate`. `runtime.data/` is kept across it. After editing `secrets.env`, run `mise run cluster:secrets`, which updates the running cluster.
 
 **Signing in.** Every app goes through oauth2-proxy (each namespace has an `sso` forwardAuth Middleware). Its sign-in page offers two ways in:
 - **Sign in with Google.** Only accounts on the **allow-list** in `manifests/10-platform/10-2-oauth2-proxy.yaml` (`authenticatedEmailsFile.restricted_access`, one per line) get in, and the list applies to every app. Google accounts must also be test users on the consent screen (below).
 - **Username and password:** user `admin`, password `LOCAL_ADMIN_PASSWORD` from `secrets.env`. This works offline, since nothing goes to Google. Local sessions have no email, so the allow-list doesn't apply to them.
   - Apps that sign you in from the email header (Grafana) show their own login form for `admin` instead. Grafana's built-in admin is set to the same `admin` and password.
-  - To change the password: edit `secrets.env`, run `mise run encrypt secrets.env`, then `mise run secrets`.
+  - To change the password: edit `secrets.env`, run `mise run encrypt secrets.env`, then `mise run cluster:secrets`.
 - To limit a single app to certain Google accounts, add `?allowed_emails=a@x.com` to that app's middleware address. That also shuts `admin` out of that app, because local sessions have no email.
 
 ## Grafana dashboards (`grafana/`)
@@ -169,7 +173,7 @@ The OpenTelemetry Operator (zero-code auto-instrumentation through a pod annotat
 - `runtime.data/tempo`: traces, kept for 72 hours.
 - `runtime.data/registry`: images in the k3d registry, so `localhost:5005` keeps them across rebuilds.
 
-`mise run clean` deletes it all. It refuses to run while the cluster exists, shows sizes, and asks you to type `clean`. Pass `--yes` to skip the prompt. The files are owned by container users (root, and postgres uid 999), so it deletes them through a throwaway container rather than `sudo`.
+`mise run cluster:clean` deletes it all. It refuses to run while the cluster exists, shows sizes, and asks you to type `clean`. Pass `--yes` to skip the prompt. The files are owned by container users (root, and postgres uid 999), so it deletes them through a throwaway container rather than `sudo`.
 
 ## Postgres
 
@@ -226,7 +230,7 @@ To expose one later, add a wildcard `*.knative.localhost` route to Kourier and r
 
 ## Apps (`apps/`)
 
-Each `apps/<name>/` directory holds a Dockerfile. `mise run build <name>` builds it as `localhost:5005/<name>:latest`, pushes it to the k3d registry and restarts any deployment labelled `app=<name>`. Inside the cluster, the image is pulled as `localdev-registry:5005/<name>:latest`. `mise run create` builds every app.
+Each `apps/<name>/` directory holds a Dockerfile. `mise run build <name>` builds it as `localhost:5005/<name>:latest`, pushes it to the k3d registry and restarts any deployment labelled `app=<name>`. Inside the cluster, the image is pulled as `localdev-registry:5005/<name>:latest`. `mise run cluster:create` builds every app.
 
 - **cnav** (`apps/cnav`, deployed by `manifests/50-apps/50-2-cnav.yaml`): a small Python server (stdlib plus PyYAML) serving the navigator page.
   - **Cards (left):** from `cards.yaml`. Fields: `component`, `icon` (an emoji), `link`, and an optional `description`.
@@ -282,4 +286,4 @@ oauth2-proxy needs a Google OAuth client ID and secret, plus a cookie secret.
    mise run encrypt secrets.env    # -> secrets.env.asc
    git add secrets.env.asc
    ```
-   `mise run create` (via `mise run secrets`) decrypts `secrets.env.asc` automatically when `secrets.env` is missing or older than it, and checks all four keys are set. Save `secrets.env` before encrypting: the encrypt task reads the file on disk. The passphrase is `$PASSPHRASE_FILE`, which defaults to `~/.ssh/id_ed25519`.
+   `mise run cluster:create` (via `mise run cluster:secrets`) decrypts `secrets.env.asc` automatically when `secrets.env` is missing or older than it, and checks all four keys are set. Save `secrets.env` before encrypting: the encrypt task reads the file on disk. The passphrase is `$PASSPHRASE_FILE`, which defaults to `~/.ssh/id_ed25519`.

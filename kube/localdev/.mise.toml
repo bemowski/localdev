@@ -1,5 +1,6 @@
 # kube/localdev — ephemeral local kubernetes (k3d)
-#   mise run create | status | destroy | recreate | secrets | build <app> | clean | pg:forward | pg:psql
+#   cluster:  mise run cluster:create | cluster:status | cluster:destroy | cluster:recreate | cluster:secrets | cluster:clean
+#   apps/tools: mise run build <app> | pg:forward | pg:psql | kn:forward
 #   mise run grafana:list | grafana:export | grafana:import | grafana:fetch   (see grafana/dashtool.py)
 #   see readme.md
 
@@ -15,12 +16,12 @@ CLUSTER_NAME = "localdev"
 KUBECONFIG = "{{config_root}}/.kubeconfig"   # never touch ~/.kube/config
 LOCALDEV_ROOT = "{{config_root}}"            # expanded in k3d.yaml (absolute host paths)
 
-[tasks.create]
+[tasks."cluster:create"]
 description = "Create the localdev k3d cluster and bootstrap secrets"
 run = """#!/bin/bash
 set -euo pipefail
 
-mise run secrets:check
+mise run cluster:secrets:check
 
 # persistent host data (see k3d.yaml); create as us, not as root via docker
 mkdir -p runtime.data/registry
@@ -31,7 +32,7 @@ k3d cluster create --config k3d.yaml \
 k3d kubeconfig get "$CLUSTER_NAME" > "$KUBECONFIG"
 chmod 600 "$KUBECONFIG"
 
-mise run secrets
+mise run cluster:secrets
 
 echo "Waiting for traefik..."
 until kubectl -n kube-system get deploy traefik >/dev/null 2>&1; do sleep 2; done
@@ -40,7 +41,7 @@ kubectl -n kube-system rollout status deploy/traefik --timeout=180s
 for app in apps/*/; do mise run build "$(basename "$app")"; done
 """
 
-[tasks."secrets:check"]
+[tasks."cluster:secrets:check"]
 description = "Decrypt secrets.env.asc if it's newer than secrets.env, and check all keys are set"
 hide = true
 run = """#!/bin/bash
@@ -54,11 +55,11 @@ for v in GOOGLE_CLIENT_ID GOOGLE_CLIENT_SECRET COOKIE_SECRET LOCAL_ADMIN_PASSWOR
 done
 """
 
-[tasks.secrets]
+[tasks."cluster:secrets"]
 description = "Load secrets.env into the cluster: oauth2-proxy (Google), local admin login, Grafana admin"
 run = """#!/bin/bash
 set -euo pipefail
-mise run secrets:check
+mise run cluster:secrets:check
 set -a; source secrets.env; set +a
 apply() { kubectl apply -f - >/dev/null && echo "  $1"; }
 for ns in auth monitoring; do
@@ -100,18 +101,18 @@ while read -r ns; do
 done
 """
 
-[tasks.destroy]
+[tasks."cluster:destroy"]
 description = "Delete the localdev cluster and its kubeconfig"
 run = """#!/bin/bash
 k3d cluster delete "$CLUSTER_NAME"
 rm -f "$KUBECONFIG"
 """
 
-[tasks.recreate]
+[tasks."cluster:recreate"]
 description = "Destroy then create"
-run = ["mise run destroy", "mise run create"]
+run = ["mise run cluster:destroy", "mise run cluster:create"]
 
-[tasks.status]
+[tasks."cluster:status"]
 description = "Show cluster, nodes, helm install jobs and ingresses"
 run = """#!/bin/bash
 k3d cluster list
@@ -121,14 +122,14 @@ kubectl get jobs -A -l helmcharts.helm.cattle.io/chart
 kubectl get ingress,ingressroutes -A 2>/dev/null
 """
 
-[tasks.clean]
+[tasks."cluster:clean"]
 description = "Delete runtime.data (postgres data, registry images). Cluster must be destroyed first."
 usage = 'flag "-y --yes" help="skip the confirmation prompt"'
 raw = true   # interactive prompt
 run = """#!/bin/bash
 set -euo pipefail
 if k3d cluster get "$CLUSTER_NAME" >/dev/null 2>&1; then
-    echo "Cluster '$CLUSTER_NAME' is running and using runtime.data. Run 'mise run destroy' first." >&2
+    echo "Cluster '$CLUSTER_NAME' is running and using runtime.data. Run 'mise run cluster:destroy' first." >&2
     exit 1
 fi
 if [ ! -d runtime.data ]; then

@@ -1,5 +1,5 @@
-# k3d cluster config — used by `mise run create`
-# The manifests/ volume is passed on the command line by `mise run create`.
+# k3d cluster config — used by `mise run cluster:create`
+# The manifests/ volume is passed on the command line by `mise run cluster:create`.
 apiVersion: k3d.io/v1alpha5
 kind: Simple
 metadata:
@@ -11,7 +11,7 @@ ports:
   - port: 80:80
     nodeFilters:
       - loadbalancer
-# Persistent host data (gitignored, wiped by `mise run clean`). ${LOCALDEV_ROOT} is set
+# Persistent host data (gitignored, wiped by `mise run cluster:clean`). ${LOCALDEV_ROOT} is set
 # by .mise.toml; k3d expands env vars here, and host paths must be absolute.
 volumes:
   - volume: ${LOCALDEV_ROOT}/runtime.data:/runtime.data   # e.g. postgres -> /runtime.data/postgres

@@ -1,6 +1,6 @@
 # Postgres 18, single instance, plain StatefulSet (no operator).
 # Data lives on the host in runtime.data/postgres (mounted into the k3d server node at
-# /runtime.data), so it survives `mise run recreate`; `mise run clean` wipes it.
+# /runtime.data), so it survives `mise run cluster:recreate`; `mise run cluster:clean` wipes it.
 #
 # Names mirror what CloudNativePG creates for a Cluster called "postgres", so apps can
 # move to CNPG later without changes:
