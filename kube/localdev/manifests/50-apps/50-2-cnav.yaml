@@ -28,6 +28,10 @@ data:
       icon: 🐘
       link: /pgweb/
       description: Postgres (tools/postgres-rw), app database
+    - component: NATS
+      icon: 📨
+      link: /nats/
+      description: "NUI: subjects, JetStream streams, KV"
     - component: whoami
       icon: 👋
       link: /whoami
@@ -88,6 +92,16 @@ data:
         - name: pgweb
           checks:
             - {kind: Deployment, namespace: tools, name: pgweb}
+        - name: NATS
+          checks:
+            - {kind: StatefulSet, namespace: tools, name: nats}
+            - {kind: HelmChart, name: nats}
+        - name: NUI
+          checks:
+            - {kind: Deployment, namespace: tools, name: nui}
+        - name: nats-box
+          checks:
+            - {kind: Deployment, namespace: tools, name: nats-box}
     - group: apps
       items:
         - name: whoami

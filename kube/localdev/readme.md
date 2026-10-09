@@ -11,6 +11,7 @@ Ephemeral local Kubernetes (k3d) with path-based routing on `http://localhost/<a
 | `/prometheus` | Prometheus UI. Use `/prometheus/targets` for scrape health. |
 | `/alertmanager` | Alertmanager UI |
 | `/pgweb` | pgweb, a Postgres web UI locked to the `app` database |
+| `/nats` | NUI, a NATS web UI: live subscribe and publish on subjects, plus JetStream streams, consumers, KV and object stores |
 | `/registry` | Registry UI (joxit/docker-registry-ui), read-only, for browsing images in the k3d registry (`localhost:5005`) |
 | *(no route)* | Loki holds every pod's logs, shipped by Alloy. Query them in Grafana → Explore → Loki, e.g. `{namespace="demo", app="whoami"}`. |
 | `/oauth2/*` | oauth2-proxy sign-in and callback (`/oauth2/sign_out` to log out) |
@@ -44,7 +45,7 @@ manifests/
   00-namespaces.yaml
   10-platform/  10-1-traefik-config  10-2-oauth2-proxy
   20-infra/     20-1-headlamp  20-2-monitoring  20-3-logging
-  30-tools/     30-1-registry-ui  30-2-postgres
+  30-tools/     30-1-registry-ui  30-2-postgres  30-3-nats
   50-apps/      50-1-whoami  50-2-cnav
 ```
 - Subfolders work at any depth.
@@ -63,6 +64,7 @@ manifests/
 
 `runtime.data/` (gitignored) sits next to this readme and survives `destroy` and `recreate`:
 - `runtime.data/postgres`: Postgres data. It's mounted into the server node at `/runtime.data`, and the pod uses it as a hostPath.
+- `runtime.data/nats`: JetStream data (streams, KV).
 - `runtime.data/registry`: images in the k3d registry, so `localhost:5005` keeps them across rebuilds.
 
 `mise run clean` deletes it all. It refuses to run while the cluster exists, shows sizes, and asks you to type `clean`. Pass `--yes` to skip the prompt. The files are owned by container users (root, and postgres uid 999), so it deletes them through a throwaway container rather than `sudo`.
@@ -75,6 +77,15 @@ Postgres 18 is a single-instance StatefulSet in `tools` (`manifests/30-tools/30-
 - **From your desktop:** run `mise run pg:forward`, then connect to `postgresql://app:localdev@localhost:5432/app`.
 - **Web UI:** `/pgweb/`.
 - **Later move to CloudNativePG:** the Service and Secret names match what CloudNativePG creates for a `Cluster` named `postgres`, so apps won't need changes. Data moves with `pg_dump` and `pg_restore`.
+
+## NATS
+
+NATS 2.15 runs as a single server with JetStream in `tools` (`manifests/30-tools/30-3-nats.yaml`, official `nats` chart).
+- **Client URL:** `nats://nats.tools.svc:4222`, with no auth (local only).
+- **Monitoring endpoint:** `http://nats.tools.svc:8222` (`/varz`, `/connz`, `/subsz`, `/jsz`).
+- **Web UI:** NUI at `/nats/`. It's preloaded with a `localdev` connection from the `nui-contexts` ConfigMap. Open the connection, then use Messages to subscribe to a subject or wildcard (`demo.>`, `>`) and watch traffic live.
+- **CLI:** `kubectl -n tools exec -it deploy/nats-box -- nats sub '>'`, or `nats stream ls`, `nats pub demo.x hi`.
+- **Metrics:** an exporter sidecar plus a PodMonitor, so Prometheus scrapes NATS automatically. Metric names start with `nats_`, e.g. `nats_varz_in_msgs`.
 
 ## Apps (`apps/`)
 

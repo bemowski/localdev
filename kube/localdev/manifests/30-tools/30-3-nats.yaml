@@ -1,0 +1,142 @@
+# NATS 2.15, single server with JetStream, in tools.
+#   client:      nats://nats.tools.svc:4222       (no auth; local only)
+#   monitoring:  http://nats.tools.svc:8222        (/varz /connz /subsz /jsz)
+#   CLI:         kubectl -n tools exec -it deploy/nats-box -- nats sub '>'
+#   UI:          NUI at /nats/ (behind SSO), preloaded with a "localdev" connection
+# JetStream data lives in runtime.data/nats (like postgres), so streams survive recreate.
+apiVersion: helm.cattle.io/v1
+kind: HelmChart
+metadata:
+  name: nats
+  namespace: kube-system
+spec:
+  repo: https://nats-io.github.io/k8s/helm/charts/
+  chart: nats
+  version: 2.15.0
+  targetNamespace: tools
+  valuesContent: |-
+    config:
+      cluster:
+        enabled: false          # single node
+      jetstream:
+        enabled: true
+        fileStore:
+          dir: /data
+          pvc:
+            enabled: false      # hostPath below instead, so data survives recreate
+    podTemplate:
+      patch:
+        - op: add
+          path: /spec/volumes/-
+          value:
+            name: jetstream
+            hostPath: {path: /runtime.data/nats, type: DirectoryOrCreate}
+        - op: add
+          path: /spec/nodeSelector
+          value: {node-role.kubernetes.io/control-plane: "true"}   # runtime.data is on the server node
+    container:
+      patch:
+        - op: add
+          path: /volumeMounts/-
+          value: {name: jetstream, mountPath: /data}
+    # metrics for the Prometheus from 20-2-monitoring (picks up PodMonitors cluster-wide)
+    promExporter:
+      enabled: true
+      podMonitor:
+        enabled: true
+    natsBox:
+      enabled: true
+---
+# NUI (https://github.com/nats-nui/nui): subjects (live sub/pub), JetStream streams,
+# consumers, KV and object stores.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: nui-contexts
+  namespace: tools
+data:
+  # a nats CLI context; NUI imports every file in --nats-cli-contexts at startup
+  localdev.json: |
+    {"description": "localdev NATS (tools/nats)", "url": "nats://nats.tools.svc:4222"}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: nui
+  namespace: tools
+  labels: {app: nui}
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {app: nui}
+  template:
+    metadata:
+      labels: {app: nui}
+    spec:
+      enableServiceLinks: false
+      containers:
+        - name: nui
+          image: ghcr.io/nats-nui/nui:0.9.3
+          args: ["--nats-cli-contexts=/contexts"]
+          ports:
+            - containerPort: 31311
+          readinessProbe:
+            httpGet: {path: /, port: 31311}
+          volumeMounts:
+            - {name: contexts, mountPath: /contexts, readOnly: true}
+            - {name: db, mountPath: /db}         # UI state; rebuilt from contexts on restart
+      volumes:
+        - name: contexts
+          configMap: {name: nui-contexts}
+        - name: db
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: nui
+  namespace: tools
+spec:
+  selector: {app: nui}
+  ports:
+    - port: 80
+      targetPort: 31311
+---
+# /nats -> /nats/ so NUI's relative asset, ./api/ and websocket paths resolve under the prefix
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  name: nats-slash
+  namespace: tools
+spec:
+  redirectRegex:
+    regex: ^(https?://[^/]+/nats)$
+    replacement: ${1}/
+---
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  name: nats-strip
+  namespace: tools
+spec:
+  stripPrefix:
+    prefixes: [/nats]
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: nui
+  namespace: tools
+  annotations:
+    traefik.ingress.kubernetes.io/router.middlewares: auth-auth-errors@kubernetescrd,tools-sso@kubernetescrd,tools-nats-slash@kubernetescrd,tools-nats-strip@kubernetescrd
+spec:
+  rules:
+    - http:
+        paths:
+          - path: /nats
+            pathType: Prefix
+            backend:
+              service:
+                name: nui
+                port:
+                  number: 80

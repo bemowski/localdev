@@ -19,6 +19,10 @@
   icon: 🐘
   link: /pgweb/
   description: Postgres (tools/postgres-rw), app database
+- component: NATS
+  icon: 📨
+  link: /nats/
+  description: "NUI: subjects, JetStream streams, KV"
 - component: whoami
   icon: 👋
   link: /whoami
