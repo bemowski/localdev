@@ -10,8 +10,9 @@ Ephemeral local Kubernetes (k3d) with path-based routing on `http://localhost/<a
 | `/grafana` | Grafana. You're signed in from the SSO email header, as an org Admin. |
 | `/prometheus` | Prometheus UI. Use `/prometheus/targets` for scrape health. |
 | `/alertmanager` | Alertmanager UI |
-| `/pgweb` | pgweb, a Postgres web UI locked to the `app` database |
+| `/pgweb` | pgweb, a Postgres web UI. Each browser tab has its own connection: pick a database bookmark (`app`, `keycloak`) on the connect screen |
 | `/nats` | NUI, a NATS web UI: live subscribe and publish on subjects, plus JetStream streams, consumers, KV and object stores |
+| `/keycloak/admin` | Keycloak admin console (an identity provider for apps), behind SSO. `/keycloak/realms/*` (login, token, discovery) is public |
 | `/registry` | Registry UI (joxit/docker-registry-ui), read-only, for browsing images in the k3d registry (`localhost:5005`) |
 | *(no route)* | Loki holds every pod's logs, shipped by Alloy. Query them in Grafana → Explore → Loki, e.g. `{namespace="demo", app="whoami"}`. |
 | `/oauth2/*` | oauth2-proxy sign-in and callback (`/oauth2/sign_out` to log out) |
@@ -46,6 +47,8 @@ mise run build cnav                         # rebuild apps/cnav, push to the loc
 mise run pg:forward                         # postgres on localhost:5432 (pass a port to change it)
 mise run pg:psql                            # psql shell in the postgres pod
 mise run kn:forward                         # Knative internal gateway on localhost:8081 (call with a Host header)
+mise run keycloak:apply                     # apply keycloak/realms/*.json to Keycloak (idempotent)
+mise run keycloak:export [realm]            # Keycloak UI changes -> keycloak/realms/<realm>.json
 
 # grafana dashboards
 mise run grafana:list                       # dashboards in Grafana
@@ -63,7 +66,7 @@ manifests/
   10-platform/  10-1-traefik-config  10-2-oauth2-proxy
   20-infra/     20-1-headlamp  20-2-monitoring  20-3-logging  20-4-scrape  20-5-tracing
   30-tools/     30-1-registry-ui (ns registry)  30-2-postgres (ns pg)  30-3-nats (ns nats)
-                30-4-knative-operator  30-5-knative (ns knative-*)
+                30-4-knative-operator  30-5-knative (ns knative-*)  30-6-keycloak (ns keycloak)
   50-apps/      50-1-whoami  50-2-cnav
 ```
 - Subfolders work at any depth.
@@ -91,7 +94,7 @@ Dashboards are files: `grafana/dashboards/<folder>/*.json`. The folder is mounte
 |---|---|
 | `platform/` | Traefik (requests, latency and errors per Ingress), oauth2-proxy (SSO checks, 401s and 403s), CoreDNS, API server, kubelet, cluster compute |
 | `infra/` | Kubernetes compute and networking by namespace, workload and pod; node exporter; Prometheus; Alertmanager; Grafana; Loki & Alloy health; OpenTelemetry services (rate, errors, duration, service graph, traces) |
-| `tools/` | Postgres (9628), Postgres top queries (pg_stat_statements), NATS server (2279), NATS JetStream (14725), Docker registry (9621), Knative (Serving autoscaling, requests, event deliveries) |
+| `tools/` | Keycloak (troubleshooting, capacity planning), Postgres (9628), Postgres top queries (pg_stat_statements), NATS server (2279), NATS JetStream (14725), Docker registry (9621), Knative (Serving autoscaling, requests, event deliveries) |
 | `apps/` | yours |
 | *(root)* `logs.json` | **Logs**, top level in Grafana: pod stdout **and** OpenTelemetry logs. Filter by namespace, app/service, **Sources** (tick pod stdout and/or OpenTelemetry), **Level** (Loki's `detected_level`, case-insensitive; synonyms grouped, e.g. warn/warning; `unknown` = no level in the line) and regex search. Error lines: text match for stdout, severity for OTel. |
 
@@ -181,7 +184,10 @@ Postgres 18 is a single-instance StatefulSet in namespace `pg` (`manifests/30-to
 - **Credentials** (fixed, dev only): user `app`, password `localdev`, database `app`.
 - **In-cluster connection:** host `postgres-rw.pg.svc:5432`. The Secret `postgres-app` has the keys `username`, `password`, `dbname`, `host`, `port`, `uri` and `jdbc-uri`.
 - **From your desktop:** run `mise run pg:forward`, then connect to `postgresql://app:localdev@localhost:5432/app`.
-- **Web UI:** `/pgweb/`.
+- **Web UI:** `/pgweb/`. Each app has its **own database** on this server (e.g. `app`, `keycloak`), not a schema in `app`.
+  - pgweb runs with `--sessions`, so **every browser tab or window has its own connection**. pgweb's default is a single connection shared by everyone.
+  - A new tab opens on the connect screen: choose a **Bookmark** (one per database), then click Connect. Within a tab, the database menu switches databases.
+  - When an app gets a new database, add a bookmark file to the `pgweb-bookmarks` ConfigMap in `30-2-postgres.yaml`.
 - **Later move to CloudNativePG:** the Service and Secret names match what CloudNativePG creates for a `Cluster` named `postgres`, so apps won't need changes. Data moves with `pg_dump` and `pg_restore`.
 
 ## NATS
@@ -227,6 +233,44 @@ To expose one later, add a wildcard `*.knative.localhost` route to Kourier and r
 **CLI:** `kn` is installed by mise. Try `kn service list -A`, `kn broker list -n demo`, `kn trigger list -n demo`.
 
 **UI:** Knative has no web UI of its own. Headlamp shows Knative's custom resources generically, under Custom Resources. Headlamp's Knative plugin is beta and covers Serving only, and isn't installed.
+
+## Keycloak (identity provider for apps)
+
+Keycloak 26 runs in namespace `keycloak` (`manifests/30-tools/30-6-keycloak.yaml`) as an **OIDC/OAuth server for the apps you build**: realms, clients, roles and test users. localdev's own sign-in (oauth2-proxy) is separate and unaffected.
+
+| what | URL |
+|---|---|
+| admin console (behind SSO, then `admin` / `LOCAL_ADMIN_PASSWORD`) | http://localhost/keycloak/admin/ |
+| issuer (put this in your app's config) | `http://localhost/keycloak/realms/localdev` |
+| discovery | `http://localhost/keycloak/realms/localdev/.well-known/openid-configuration` |
+| from pods (token, JWKS, discovery) | `http://keycloak.keycloak.svc:8080/keycloak/realms/localdev/...` |
+
+- **Browser vs. pod URLs.** Browsers use `localhost`, while pods can't reach `localhost`.
+  - Keycloak issues every token with the `localhost` issuer.
+  - When asked from inside the cluster, its discovery document lists **in-cluster** token and JWKS addresses.
+  - So point the app's *discovery URL* at the in-cluster address, and set its *expected issuer* to the `localhost` one.
+
+  Example environment:
+  ```yaml
+  OIDC_ISSUER: http://localhost/keycloak/realms/localdev
+  OIDC_DISCOVERY_URL: http://keycloak.keycloak.svc:8080/keycloak/realms/localdev/.well-known/openid-configuration
+  ```
+- **The `/keycloak/realms/*` paths are public** (no localdev SSO): app login pages, token, discovery and JWKS work for any client, including curl.
+- **Realms are code:** `keycloak/realms/<realm>.json`.
+  - `mise run keycloak:apply` applies them with keycloak-config-cli. It's idempotent and runs during `cluster:create`.
+  - `mise run keycloak:export [realm]` writes realm changes made in the admin UI back to the file. The export is **trimmed** to your clients, roles, groups and common realm settings, so files stay readable. Users and client secrets are kept from the file, because Keycloak never exports them.
+- **The starter realm `localdev`** has **dev-only credentials**:
+  - **`demo-app`:** public client, browser login with PKCE, redirects to `http://localhost/*`. Password grant is enabled for curl testing.
+  - **`demo-service`:** confidential client, client credentials, secret `demo-service-secret`.
+  - **Roles** `user` and `admin`; group `admins`.
+  - **Users** `alice` (user) and `bob` (admins), both with password `password`.
+  ```bash
+  curl -s http://localhost/keycloak/realms/localdev/protocol/openid-connect/token \
+    -d grant_type=password -d client_id=demo-app -d username=alice -d password=password | jq -r .access_token
+  ```
+- **Data** lives in database `keycloak` on `pg/postgres`, which an init container creates. It survives `cluster:recreate`.
+- **Metrics:** Keycloak is scraped via the `metrics: enabled` label. User-event metrics and HTTP latency histograms are on. Dashboards are in `tools/`.
+- **Resources:** about 0.5–0.7 GiB of memory, and roughly 30–60 seconds to start.
 
 ## Apps (`apps/`)
 

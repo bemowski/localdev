@@ -1,6 +1,6 @@
 # kube/localdev — ephemeral local kubernetes (k3d)
 #   cluster:  mise run cluster:create | cluster:status | cluster:destroy | cluster:recreate | cluster:secrets | cluster:clean
-#   apps/tools: mise run build <app> | pg:forward | pg:psql | kn:forward
+#   apps/tools: mise run build <app> | pg:forward | pg:psql | kn:forward | keycloak:apply | keycloak:export
 #   mise run grafana:list | grafana:export | grafana:import | grafana:fetch   (see grafana/dashtool.py)
 #   see readme.md
 
@@ -39,6 +39,8 @@ until kubectl -n kube-system get deploy traefik >/dev/null 2>&1; do sleep 2; don
 kubectl -n kube-system rollout status deploy/traefik --timeout=180s
 
 for app in apps/*/; do mise run build "$(basename "$app")"; done
+
+mise run keycloak:apply
 """
 
 [tasks."cluster:secrets:check"]
@@ -62,7 +64,7 @@ set -euo pipefail
 mise run cluster:secrets:check
 set -a; source secrets.env; set +a
 apply() { kubectl apply -f - >/dev/null && echo "  $1"; }
-for ns in auth monitoring; do
+for ns in auth monitoring keycloak; do
     kubectl create namespace $ns --dry-run=client -o yaml | kubectl apply -f - >/dev/null
 done
 kubectl -n auth create secret generic oauth2-proxy \
@@ -78,6 +80,10 @@ kubectl -n auth create secret generic oauth2-proxy-htpasswd --from-literal=users
 kubectl -n monitoring create secret generic grafana-admin \
     --from-literal=admin-user=admin --from-literal=admin-password="$LOCAL_ADMIN_PASSWORD" \
     --dry-run=client -o yaml | apply "monitoring/grafana-admin"
+# Keycloak's bootstrap admin (master realm) = the same admin
+kubectl -n keycloak create secret generic keycloak-admin \
+    --from-literal=username=admin --from-literal=password="$LOCAL_ADMIN_PASSWORD" \
+    --dry-run=client -o yaml | apply "keycloak/keycloak-admin"
 # pods read these at startup: restart the ones that already exist (no-op on a fresh cluster)
 kubectl -n auth rollout restart deploy/oauth2-proxy >/dev/null 2>&1 && echo "  restarted oauth2-proxy" || true
 """
@@ -223,3 +229,60 @@ kubectl -n knative-serving port-forward svc/kourier-internal "${usage_port}:80"
 [tasks."grafana:check"]
 description = "Validate grafana/dashboards: JSON parses, uids unique (a duplicate freezes provisioning)"
 run = "python3 grafana/dashtool.py check"
+
+# --- keycloak (IdP for apps; realms as code in keycloak/realms/*.json) -------------------
+
+[tasks."keycloak:apply"]
+description = "Apply keycloak/realms/*.json to Keycloak (keycloak-config-cli Job; idempotent)"
+run = """#!/bin/bash
+set -euo pipefail
+kubectl -n keycloak create configmap keycloak-realms --from-file=keycloak/realms/ \
+    --dry-run=client -o yaml | kubectl apply -f - >/dev/null
+echo "Waiting for Keycloak..."
+kubectl -n keycloak rollout status deploy/keycloak --timeout=300s
+kubectl -n keycloak delete job keycloak-config --ignore-not-found >/dev/null
+kubectl apply -f - >/dev/null <<'EOF'
+apiVersion: batch/v1
+kind: Job
+metadata: {name: keycloak-config, namespace: keycloak}
+spec:
+  backoffLimit: 0
+  ttlSecondsAfterFinished: 3600
+  template:
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: keycloak-config-cli
+          image: adorsys/keycloak-config-cli:6.5.1-26.5.5
+          env:
+            - {name: KEYCLOAK_URL, value: "http://keycloak.keycloak.svc:8080/keycloak"}
+            - name: KEYCLOAK_USER
+              valueFrom: {secretKeyRef: {name: keycloak-admin, key: username}}
+            - name: KEYCLOAK_PASSWORD
+              valueFrom: {secretKeyRef: {name: keycloak-admin, key: password}}
+            - {name: KEYCLOAK_AVAILABILITYCHECK_ENABLED, value: "true"}
+            - {name: KEYCLOAK_AVAILABILITYCHECK_TIMEOUT, value: "120s"}
+            - {name: IMPORT_FILES_LOCATIONS, value: "/config/*.json"}
+          volumeMounts: [{name: realms, mountPath: /config}]
+      volumes: [{name: realms, configMap: {name: keycloak-realms}}]
+EOF
+if kubectl -n keycloak wait --for=condition=complete job/keycloak-config --timeout=300s >/dev/null; then
+    kubectl -n keycloak logs job/keycloak-config | grep -E "Importing file|realm|Done|ERROR" | sed 's/^/  /' | tail -15
+    echo "keycloak:apply done"
+else
+    kubectl -n keycloak logs job/keycloak-config | tail -30
+    echo "keycloak:apply FAILED" >&2; exit 1
+fi
+"""
+
+[tasks."keycloak:export"]
+description = "Save a realm configured in the Keycloak UI back to keycloak/realms/<realm>.json"
+usage = 'arg "[realm]" default="localdev"'
+run = """#!/bin/bash
+set -euo pipefail
+set -a; source secrets.env; set +a
+kubectl -n keycloak port-forward svc/keycloak 18180:8080 >/dev/null 2>&1 & pf=$!
+trap 'kill $pf' EXIT
+until curl -sf -o /dev/null http://localhost:18180/keycloak/realms/master; do sleep 0.5; done
+KEYCLOAK_URL=http://localhost:18180/keycloak python3 keycloak/realmtool.py export "$usage_realm"
+"""

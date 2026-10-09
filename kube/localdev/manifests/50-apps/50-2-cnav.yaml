@@ -32,6 +32,10 @@ data:
       icon: 📨
       link: /nats/
       description: "NUI: subjects, JetStream streams, KV"
+    - component: Keycloak
+      icon: 🔐
+      link: /keycloak/admin/
+      description: Identity provider for apps (realm localdev)
     - component: whoami
       icon: 👋
       link: /whoami
@@ -107,6 +111,9 @@ data:
         - name: nats-box
           checks:
             - {kind: Deployment, namespace: nats, name: nats-box}
+        - name: Keycloak
+          checks:
+            - {kind: Deployment, namespace: keycloak, name: keycloak}
         - name: Knative operator
           namespace: kn-operator     # display only; real ns knative-operator
           checks:

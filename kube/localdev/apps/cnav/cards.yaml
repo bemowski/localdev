@@ -23,6 +23,10 @@
   icon: 📨
   link: /nats/
   description: "NUI: subjects, JetStream streams, KV"
+- component: Keycloak
+  icon: 🔐
+  link: /keycloak/admin/
+  description: Identity provider for apps (realm localdev)
 - component: whoami
   icon: 👋
   link: /whoami

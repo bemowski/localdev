@@ -101,7 +101,31 @@ spec:
   ports:
     - port: 5432
 ---
-# pgweb at /pgweb/, locked to the app database. Behind SSO (pg/sso middleware).
+# pgweb at /pgweb/, behind SSO (pg/sso middleware). --sessions: every browser tab/window has
+# its own connection (pgweb's default is ONE connection shared by everyone). A new tab opens on
+# the connect screen: pick a bookmark (one per database, below) - one click.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: pgweb-bookmarks
+  namespace: pg
+data:
+  # one file per database on pg/postgres; add a file here when an app gets its own database
+  app.toml: |
+    host = "postgres-rw.pg.svc"
+    port = 5432
+    user = "app"
+    password = "localdev"
+    database = "app"
+    sslmode = "disable"
+  keycloak.toml: |
+    host = "postgres-rw.pg.svc"
+    port = 5432
+    user = "app"
+    password = "localdev"
+    database = "keycloak"
+    sslmode = "disable"
+---
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -125,14 +149,16 @@ spec:
       containers:
         - name: pgweb
           image: sosedoff/pgweb:0.17.0
-          args: ["--bind=0.0.0.0", "--listen=8081", "--prefix=pgweb", "--lock-session", "--no-ssh"]
-          env:
-            - name: PGWEB_DATABASE_URL
-              value: postgres://app:localdev@postgres-rw.pg.svc:5432/app?sslmode=disable
+          args: ["--bind=0.0.0.0", "--listen=8081", "--prefix=pgweb", "--no-ssh", "--sessions", "--bookmarks-dir=/bookmarks"]
+          volumeMounts:
+            - {name: bookmarks, mountPath: /bookmarks, readOnly: true}
           ports:
             - containerPort: 8081
           readinessProbe:
             httpGet: {path: /pgweb/, port: 8081}
+      volumes:
+        - name: bookmarks
+          configMap: {name: pgweb-bookmarks}
 ---
 apiVersion: v1
 kind: Service

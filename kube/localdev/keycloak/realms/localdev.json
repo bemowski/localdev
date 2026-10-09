@@ -1,0 +1,64 @@
+{
+  "realm": "localdev",
+  "enabled": true,
+  "displayName": "localdev",
+  "loginWithEmailAllowed": true,
+  "registrationAllowed": false,
+  "roles": {
+    "realm": [
+      {"name": "user", "description": "Regular app user"},
+      {"name": "admin", "description": "App administrator"}
+    ]
+  },
+  "groups": [
+    {"name": "admins", "realmRoles": ["user", "admin"]}
+  ],
+  "clients": [
+    {
+      "clientId": "demo-app",
+      "name": "Demo app (browser login, PKCE)",
+      "description": "Public client for browser apps. Direct access grants are enabled for local testing with curl only.",
+      "publicClient": true,
+      "standardFlowEnabled": true,
+      "directAccessGrantsEnabled": true,
+      "redirectUris": ["http://localhost/*"],
+      "webOrigins": ["http://localhost"],
+      "attributes": {
+        "pkce.code.challenge.method": "S256",
+        "post.logout.redirect.uris": "http://localhost/*"
+      }
+    },
+    {
+      "clientId": "demo-service",
+      "name": "Demo service (client credentials)",
+      "description": "Confidential client for service-to-service calls. Dev-only fixed secret.",
+      "publicClient": false,
+      "secret": "demo-service-secret",
+      "serviceAccountsEnabled": true,
+      "standardFlowEnabled": false,
+      "directAccessGrantsEnabled": false
+    }
+  ],
+  "users": [
+    {
+      "username": "alice",
+      "enabled": true,
+      "email": "alice@localdev.test",
+      "emailVerified": true,
+      "firstName": "Alice",
+      "lastName": "Dev",
+      "credentials": [{"type": "password", "value": "password", "temporary": false}],
+      "realmRoles": ["user"]
+    },
+    {
+      "username": "bob",
+      "enabled": true,
+      "email": "bob@localdev.test",
+      "emailVerified": true,
+      "firstName": "Bob",
+      "lastName": "Admin",
+      "credentials": [{"type": "password", "value": "password", "temporary": false}],
+      "groups": ["admins"]
+    }
+  ]
+}
