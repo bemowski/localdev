@@ -54,7 +54,7 @@ k9s                  # uses ./.kubeconfig via mise env; ~/.kube/config is never 
 manifests/
   00-namespaces.yaml
   10-platform/  10-1-traefik-config  10-2-oauth2-proxy
-  20-infra/     20-1-headlamp  20-2-monitoring  20-3-logging  20-4-scrape
+  20-infra/     20-1-headlamp  20-2-monitoring  20-3-logging  20-4-scrape  20-5-tracing
   30-tools/     30-1-registry-ui  30-2-postgres  30-3-nats
   50-apps/      50-1-whoami  50-2-cnav
 ```
@@ -77,7 +77,7 @@ Dashboards are files: `grafana/dashboards/<folder>/*.json`. The folder is mounte
 | folder | what's in it |
 |---|---|
 | `platform/` | Traefik (requests, latency and errors per Ingress), oauth2-proxy (SSO checks, 401s and 403s), CoreDNS, API server, kubelet, cluster compute |
-| `infra/` | Kubernetes compute and networking by namespace, workload and pod; node exporter; Prometheus; Alertmanager; Grafana; Loki & Alloy health; Logs overview (filter by namespace and app, regex search) |
+| `infra/` | Kubernetes compute and networking by namespace, workload and pod; node exporter; Prometheus; Alertmanager; Grafana; Loki & Alloy health; Logs overview (filter by namespace and app, regex search); OpenTelemetry services (rate, errors, duration, service graph, traces) |
 | `tools/` | Postgres (9628), Postgres top queries (pg_stat_statements), NATS server (2279), NATS JetStream (14725), Docker registry (9621) |
 | `apps/` | yours |
 
@@ -113,11 +113,46 @@ template:
 
 Postgres uses this convention for its exporter sidecar. The scrape definitions for platform and infra components, and for the registry outside the cluster, are in `manifests/20-infra/20-4-scrape.yaml`.
 
+## OpenTelemetry (traces, metrics and logs over OTLP)
+
+Alloy is the cluster's OpenTelemetry collector. Point any OTel SDK or agent at it:
+
+```yaml
+env:
+  - {name: OTEL_EXPORTER_OTLP_ENDPOINT, value: "http://alloy.monitoring.svc:4318"}   # HTTP; gRPC: :4317
+  - {name: OTEL_SERVICE_NAME,           value: "orders"}
+  - {name: OTEL_EXPORTER_OTLP_PROTOCOL, value: "http/protobuf"}
+```
+
+Alloy tags everything with the sending pod's `k8s.namespace.name`, `k8s.pod.name`, `k8s.deployment.name` and so on, then routes each signal:
+
+| signal | goes to | in Grafana |
+|---|---|---|
+| traces | **Tempo** (`20-5-tracing.yaml`, 72-hour retention, `runtime.data/tempo`) | Explore → Tempo, TraceQL `{resource.service.name="orders"}` |
+| metrics | Prometheus's native OTLP receiver. `job` = service name; namespace, pod and deployment become labels | any dashboard; resource attributes are in `target_info` |
+| logs | Loki's native OTLP endpoint. `service_name` and `k8s_*` are labels; `trace_id` and `span_id` are structured metadata | Explore → Loki, `{service_name="orders"}` |
+
+**How the signals link up:**
+- **Trace → logs:** each span links to the Loki lines with the same trace ID.
+- **Log → trace:** the `trace_id` on an OTLP log line links to Tempo.
+- **Metric → trace:** Tempo's span metrics (`traces_spanmetrics_*`) and service graph are written into Prometheus, with **exemplars**. The dots on latency graphs open the trace behind them.
+- The **OpenTelemetry services** dashboard (`infra/`) shows rate, errors and duration per service, the service graph, top operations and recent traces, for any service that sends traces.
+
+**To try it without an app**, OpenTelemetry's load generator works:
+```bash
+kubectl -n demo run tg --rm -it --restart=Never \
+  --image=ghcr.io/open-telemetry/opentelemetry-collector-contrib/telemetrygen:v0.161.0 -- \
+  traces --otlp-endpoint=alloy.monitoring.svc:4317 --otlp-insecure --duration=60s --rate=5 --child-spans=3 --service=otel-demo
+```
+
+The OpenTelemetry Operator (zero-code auto-instrumentation through a pod annotation) isn't installed yet. It's the planned next step once real apps arrive.
+
 ## Persistent data (`runtime.data/`)
 
 `runtime.data/` (gitignored) sits next to this readme and survives `destroy` and `recreate`:
 - `runtime.data/postgres`: Postgres data. It's mounted into the server node at `/runtime.data`, and the pod uses it as a hostPath.
 - `runtime.data/nats`: JetStream data (streams, KV).
+- `runtime.data/tempo`: traces, kept for 72 hours.
 - `runtime.data/registry`: images in the k3d registry, so `localhost:5005` keeps them across rebuilds.
 
 `mise run clean` deletes it all. It refuses to run while the cluster exists, shows sizes, and asks you to type `clean`. Pass `--yes` to skip the prompt. The files are owned by container users (root, and postgres uid 999), so it deletes them through a throwaway container rather than `sudo`.

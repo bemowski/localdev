@@ -1,0 +1,55 @@
+# Traces: Tempo 3 (single binary), fed by Alloy's OTLP pipeline (20-3-logging.yaml).
+#   apps send OTLP to Alloy -> traces to tempo:4317 here
+#   query API: http://tempo.monitoring.svc:3200 (Grafana datasource "Tempo")
+#   metrics generator: span metrics + service graph -> Prometheus remote write
+# Data lives in runtime.data/tempo (like postgres/nats), so traces survive recreate.
+apiVersion: helm.cattle.io/v1
+kind: HelmChart
+metadata:
+  name: tempo
+  namespace: kube-system
+spec:
+  repo: https://grafana-community.github.io/helm-charts
+  chart: tempo
+  version: 3.1.0
+  targetNamespace: monitoring
+  valuesContent: |-
+    fullnameOverride: tempo
+    tempo:
+      reportingEnabled: false
+      retention: 72h
+      # only OTLP (the chart default also opens jaeger ports)
+      receivers:
+        otlp:
+          protocols:
+            grpc: {endpoint: "0.0.0.0:4317"}
+            http: {endpoint: "0.0.0.0:4318"}
+      metricsGenerator:
+        enabled: true
+        # needs prometheusSpec.enableRemoteWriteReceiver + exemplar-storage (20-2-monitoring.yaml)
+        storage:
+          path: /tmp/tempo
+          remote_write:
+            - url: http://kps-prometheus.monitoring.svc:9090/prometheus/api/v1/write
+              send_exemplars: true          # trace ids on span-metric samples -> click through to traces
+        registry:
+          external_labels: {source: tempo}
+      overrides:
+        defaults:
+          metrics_generator:
+            processors: [service-graphs, span-metrics]
+      extraVolumeMounts:
+        - {name: tempo-data, mountPath: /var/tempo}
+    # runtime.data is on the server node; tempo runs as uid 10001, the hostPath dir starts root-owned
+    nodeSelector:
+      node-role.kubernetes.io/control-plane: "true"
+    extraVolumes:
+      - name: tempo-data
+        hostPath: {path: /runtime.data/tempo, type: DirectoryOrCreate}
+    initContainers:
+      - name: chown-data
+        image: busybox:1.37
+        command: ["sh", "-c", "chown -R 10001:10001 /var/tempo"]
+        securityContext: {runAsUser: 0, runAsNonRoot: false}
+        volumeMounts:
+          - {name: tempo-data, mountPath: /var/tempo}

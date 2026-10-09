@@ -86,3 +86,15 @@ spec:
   staticConfigs:
     - targets: ["localdev-registry:5001"]
       labels: {job: registry}
+---
+apiVersion: monitoring.coreos.com/v1
+kind: PodMonitor
+metadata:
+  name: tempo
+  namespace: monitoring
+spec:
+  selector:
+    matchLabels: {app.kubernetes.io/name: tempo}
+  podMetricsEndpoints:
+    - port: prom-metrics
+      path: /metrics

@@ -70,18 +70,72 @@ spec:
           auto_sign_up: true
         users:
           auto_assign_org_role: Admin   # the SSO allow-list is the gate
+      sidecar:
+        datasources:
+          # Tempo span-metric exemplars carry `traceID`: clickable trace dots on Prometheus graphs
+          exemplarTraceIdDestinations:
+            datasourceUid: tempo
+            traceIdLabelName: traceID
+            urlDisplayLabel: View trace
       additionalDataSources:
         - name: Loki                    # deployed by 20-3-logging.yaml
           type: loki
           uid: loki
           url: http://loki.monitoring.svc:3100
           access: proxy
+          jsonData:
+            derivedFields:              # OTLP logs carry trace_id as structured metadata -> Tempo
+              - name: TraceID
+                matcherType: label
+                matcherRegex: trace_id
+                datasourceUid: tempo
+                url: "$${__value.raw}"           # $$ = literal $ in Grafana provisioning
+                urlDisplayLabel: View trace
+        - name: Tempo                   # deployed by 20-5-tracing.yaml
+          type: tempo
+          uid: tempo
+          url: http://tempo.monitoring.svc:3200
+          access: proxy
+          jsonData:
+            nodeGraph: {enabled: true}
+            serviceMap: {datasourceUid: prometheus}       # Tempo metrics-generator service graph
+            lokiSearch: {datasourceUid: loki}
+            tracesToLogsV2:                                # span -> its logs (OTLP logs, same trace)
+              datasourceUid: loki
+              filterByTraceID: true
+              spanStartTimeShift: "-5m"
+              spanEndTimeShift: "5m"
+              tags:
+                - {key: service.name, value: service_name}
+            tracesToMetrics:                               # span -> span-metrics rate/latency
+              datasourceUid: prometheus
+              spanStartTimeShift: "-5m"
+              spanEndTimeShift: "5m"
+              tags:
+                - {key: service.name, value: service}
+              queries:
+                - name: Request rate
+                  query: 'sum(rate(traces_spanmetrics_calls_total{$$__tags}[5m]))'
+                - name: p95 latency
+                  query: 'histogram_quantile(0.95, sum by (le) (rate(traces_spanmetrics_latency_bucket{$$__tags}[5m])))'
 
     prometheus:
       prometheusSpec:
         routePrefix: /prometheus
         externalUrl: http://localhost/prometheus
         retention: 2d
+        # OpenTelemetry: Alloy pushes app metrics via OTLP (/prometheus/api/v1/otlp), Tempo's
+        # metrics generator pushes span metrics + service graph via remote write
+        enableOTLPReceiver: true
+        enableRemoteWriteReceiver: true
+        enableFeatures: [exemplar-storage]          # metric points link to traces in Grafana
+        otlp:
+          promoteResourceAttributes:                # OTLP resource attrs -> labels (rest go to target_info)
+            - service.namespace
+            - k8s.namespace.name
+            - k8s.pod.name
+            - k8s.deployment.name
+            - k8s.container.name
         # pick up every ServiceMonitor/PodMonitor/rule in the cluster, not just this release's
         serviceMonitorSelectorNilUsesHelmValues: false
         podMonitorSelectorNilUsesHelmValues: false

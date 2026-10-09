@@ -77,10 +77,14 @@ data:
           checks:
             - {kind: StatefulSet, namespace: monitoring, name: loki}
             - {kind: HelmChart, name: loki}
-        - name: Alloy
+        - name: Alloy (logs + OTLP)
           checks:
             - {kind: Deployment, namespace: monitoring, name: alloy}
             - {kind: HelmChart, name: alloy}
+        - name: Tempo
+          checks:
+            - {kind: StatefulSet, namespace: monitoring, name: tempo}
+            - {kind: HelmChart, name: tempo}
     - group: tools
       items:
         - name: Registry UI

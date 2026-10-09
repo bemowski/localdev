@@ -1,5 +1,8 @@
 # Logs: Loki (single binary, filesystem) + Alloy tailing every pod via the k8s API.
-# Query in Grafana -> Explore -> Loki. No UI of its own, so no ingress.
+# Alloy is also the cluster's OpenTelemetry collector: apps send OTLP to
+#   alloy.monitoring.svc:4317 (gRPC) / :4318 (HTTP)
+# and it routes metrics -> Prometheus, logs -> Loki, traces -> Tempo (20-5-tracing.yaml).
+# Query in Grafana -> Explore. No UI of its own, so no ingress.
 apiVersion: helm.cattle.io/v1
 kind: HelmChart
 metadata:
@@ -52,6 +55,9 @@ spec:
       type: deployment
       replicas: 1
     alloy:
+      extraPorts:
+        - {name: otlp-grpc, port: 4317, targetPort: 4317, protocol: TCP, appProtocol: grpc}
+        - {name: otlp-http, port: 4318, targetPort: 4318, protocol: TCP}
       configMap:
         content: |-
           discovery.kubernetes "pods" {
@@ -88,5 +94,53 @@ spec:
           loki.write "default" {
             endpoint {
               url = "http://loki.monitoring.svc:3100/loki/api/v1/push"
+            }
+          }
+
+          // ---- OpenTelemetry: OTLP in, one exporter per signal --------------------
+          otelcol.receiver.otlp "default" {
+            grpc { endpoint = "0.0.0.0:4317" }
+            http { endpoint = "0.0.0.0:4318" }
+            output {
+              metrics = [otelcol.processor.k8sattributes.default.input]
+              logs    = [otelcol.processor.k8sattributes.default.input]
+              traces  = [otelcol.processor.k8sattributes.default.input]
+            }
+          }
+
+          // tag everything with the sending pod's namespace/pod/deployment (matched by source IP)
+          otelcol.processor.k8sattributes "default" {
+            extract {
+              metadata = ["k8s.namespace.name", "k8s.pod.name", "k8s.deployment.name", "k8s.container.name", "k8s.node.name"]
+            }
+            output {
+              metrics = [otelcol.processor.batch.default.input]
+              logs    = [otelcol.processor.batch.default.input]
+              traces  = [otelcol.processor.batch.default.input]
+            }
+          }
+
+          otelcol.processor.batch "default" {
+            output {
+              metrics = [otelcol.exporter.otlphttp.prometheus.input]
+              logs    = [otelcol.exporter.otlphttp.loki.input]
+              traces  = [otelcol.exporter.otlp.tempo.input]
+            }
+          }
+
+          // Prometheus native OTLP receiver (exporter appends /v1/metrics)
+          otelcol.exporter.otlphttp "prometheus" {
+            client { endpoint = "http://kps-prometheus.monitoring.svc:9090/prometheus/api/v1/otlp" }
+          }
+
+          // Loki 3 native OTLP endpoint (exporter appends /v1/logs); trace_id kept as structured metadata
+          otelcol.exporter.otlphttp "loki" {
+            client { endpoint = "http://loki.monitoring.svc:3100/otlp" }
+          }
+
+          otelcol.exporter.otlp "tempo" {
+            client {
+              endpoint = "tempo.monitoring.svc:4317"
+              tls { insecure = true }
             }
           }
