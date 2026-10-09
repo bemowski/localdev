@@ -1,5 +1,5 @@
 # kube/localdev — ephemeral local kubernetes (k3d)
-#   mise run create | status | destroy | recreate | build <app> | clean | pg:forward | pg:psql
+#   mise run create | status | destroy | recreate | secrets | build <app> | clean | pg:forward | pg:psql
 #   mise run grafana:list | grafana:export | grafana:import | grafana:fetch   (see grafana/dashtool.py)
 #   see readme.md
 
@@ -20,13 +20,7 @@ description = "Create the localdev k3d cluster and bootstrap secrets"
 run = """#!/bin/bash
 set -euo pipefail
 
-if [ ! -s secrets.env ]; then
-    mise run decrypt "{{config_root}}/secrets.env.asc"
-fi
-set -a; source secrets.env; set +a
-for v in GOOGLE_CLIENT_ID GOOGLE_CLIENT_SECRET COOKIE_SECRET; do
-    [ -n "${!v:-}" ] || { echo "ERROR: $v missing from secrets.env (see readme.md)" >&2; exit 1; }
-done
+mise run secrets:check
 
 # persistent host data (see k3d.yaml); create as us, not as root via docker
 mkdir -p runtime.data/registry
@@ -37,18 +31,54 @@ k3d cluster create --config k3d.yaml \
 k3d kubeconfig get "$CLUSTER_NAME" > "$KUBECONFIG"
 chmod 600 "$KUBECONFIG"
 
-kubectl create namespace auth --dry-run=client -o yaml | kubectl apply -f -
-kubectl -n auth create secret generic oauth2-proxy \
-    --from-literal=client-id="$GOOGLE_CLIENT_ID" \
-    --from-literal=client-secret="$GOOGLE_CLIENT_SECRET" \
-    --from-literal=cookie-secret="$COOKIE_SECRET" \
-    --dry-run=client -o yaml | kubectl apply -f -
+mise run secrets
 
 echo "Waiting for traefik..."
 until kubectl -n kube-system get deploy traefik >/dev/null 2>&1; do sleep 2; done
 kubectl -n kube-system rollout status deploy/traefik --timeout=180s
 
 for app in apps/*/; do mise run build "$(basename "$app")"; done
+"""
+
+[tasks."secrets:check"]
+description = "Decrypt secrets.env.asc if it's newer than secrets.env, and check all keys are set"
+hide = true
+run = """#!/bin/bash
+set -euo pipefail
+if [ ! -s secrets.env ] || [ secrets.env.asc -nt secrets.env ]; then
+    mise run decrypt "{{config_root}}/secrets.env.asc"
+fi
+set -a; source secrets.env; set +a
+for v in GOOGLE_CLIENT_ID GOOGLE_CLIENT_SECRET COOKIE_SECRET LOCAL_ADMIN_PASSWORD; do
+    [ -n "${!v:-}" ] || { echo "ERROR: $v missing from secrets.env (see readme.md)" >&2; exit 1; }
+done
+"""
+
+[tasks.secrets]
+description = "Load secrets.env into the cluster: oauth2-proxy (Google), local admin login, Grafana admin"
+run = """#!/bin/bash
+set -euo pipefail
+mise run secrets:check
+set -a; source secrets.env; set +a
+apply() { kubectl apply -f - >/dev/null && echo "  $1"; }
+for ns in auth monitoring; do
+    kubectl create namespace $ns --dry-run=client -o yaml | kubectl apply -f - >/dev/null
+done
+kubectl -n auth create secret generic oauth2-proxy \
+    --from-literal=client-id="$GOOGLE_CLIENT_ID" \
+    --from-literal=client-secret="$GOOGLE_CLIENT_SECRET" \
+    --from-literal=cookie-secret="$COOKIE_SECRET" \
+    --dry-run=client -o yaml | apply "auth/oauth2-proxy (Google client, cookie secret)"
+# local login for oauth2-proxy's sign-in form: user admin, bcrypt via htpasswd (password on stdin)
+htline=$(printf '%s' "$LOCAL_ADMIN_PASSWORD" | docker run --rm -i httpd:2.4-alpine htpasswd -niB admin)
+kubectl -n auth create secret generic oauth2-proxy-htpasswd --from-literal=users.txt="$htline" \
+    --dry-run=client -o yaml | apply "auth/oauth2-proxy-htpasswd (local user admin)"
+# Grafana's built-in admin = the same admin (Grafana login form, for non-Google sessions)
+kubectl -n monitoring create secret generic grafana-admin \
+    --from-literal=admin-user=admin --from-literal=admin-password="$LOCAL_ADMIN_PASSWORD" \
+    --dry-run=client -o yaml | apply "monitoring/grafana-admin"
+# pods read these at startup: restart the ones that already exist (no-op on a fresh cluster)
+kubectl -n auth rollout restart deploy/oauth2-proxy >/dev/null 2>&1 && echo "  restarted oauth2-proxy" || true
 """
 
 [tasks.build]
@@ -149,7 +179,7 @@ python3 grafana/dashtool.py list
 description = "Save a Grafana dashboard to grafana/dashboards/<folder>/ (default: its Grafana folder, else apps)"
 usage = '''
 arg "<dashboard>" help="uid or title search"
-arg "[folder]" help="platform | infra | tools | apps | <new folder>"
+arg "[folder]" help="platform | infra | tools | apps | root | <new folder> (default: where its file already is)"
 '''
 run = """#!/bin/bash
 set -euo pipefail

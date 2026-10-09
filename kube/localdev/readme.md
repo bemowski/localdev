@@ -6,7 +6,7 @@ Ephemeral local Kubernetes (k3d) with path-based routing on `http://localhost/<a
 |---|---|
 | `/` | Cluster navigator (cnav): cards linking to the apps below. It's also the catch-all, so unknown paths land here. |
 | `/whoami` | SSO test app. It echoes the request headers, including `X-Auth-Request-Email`. |
-| `/headlamp` | Kubernetes UI. No token login: Headlamp acts as its own cluster-admin account, so the SSO allow-list is the only gate. |
+| `/headlamp` | Kubernetes UI. No token login: Headlamp acts as its own cluster-admin account, so SSO is the only gate. |
 | `/grafana` | Grafana. You're signed in from the SSO email header, as an org Admin. |
 | `/prometheus` | Prometheus UI. Use `/prometheus/targets` for scrape health. |
 | `/alertmanager` | Alertmanager UI |
@@ -36,6 +36,7 @@ Ephemeral local Kubernetes (k3d) with path-based routing on `http://localhost/<a
 mise run create      # create cluster, write .kubeconfig, load secrets, wait for traefik
 mise run status      # nodes, helm install jobs, ingresses
 mise run destroy     # delete cluster + .kubeconfig
+mise run secrets     # (re)load secrets.env into the cluster: Google client, admin login, Grafana admin
 mise run recreate
 mise run build cnav  # rebuild apps/cnav, push to the local registry, restart it
 mise run pg:forward  # postgres on localhost:5432 (pass a port to change it)
@@ -68,9 +69,14 @@ manifests/
 - Removing an object from a file deletes it from the cluster.
 - Changing a `HelmChart`'s `valuesContent` runs a Helm upgrade.
 - **Deleting a whole file does not delete its objects.** Remove them from the file first, or `kubectl delete` them.
-- Changes to `k3d.yaml` or `secrets.env` need `mise run recreate`. `runtime.data/` is kept across it.
+- Changes to `k3d.yaml` need `mise run recreate`. `runtime.data/` is kept across it. After editing `secrets.env`, run `mise run secrets`, which updates the running cluster.
 
-**Allow-lists.** Each app has its own `sso` forwardAuth Middleware with `?allowed_emails=a@x.com,b@y.com`. Google accounts must also be listed as test users on the consent screen (below).
+**Signing in.** Every app goes through oauth2-proxy (each namespace has an `sso` forwardAuth Middleware). Its sign-in page offers two ways in:
+- **Sign in with Google.** Only accounts on the **allow-list** in `manifests/10-platform/10-2-oauth2-proxy.yaml` (`authenticatedEmailsFile.restricted_access`, one per line) get in, and the list applies to every app. Google accounts must also be test users on the consent screen (below).
+- **Username and password:** user `admin`, password `LOCAL_ADMIN_PASSWORD` from `secrets.env`. This works offline, since nothing goes to Google. Local sessions have no email, so the allow-list doesn't apply to them.
+  - Apps that sign you in from the email header (Grafana) show their own login form for `admin` instead. Grafana's built-in admin is set to the same `admin` and password.
+  - To change the password: edit `secrets.env`, run `mise run encrypt secrets.env`, then `mise run secrets`.
+- To limit a single app to certain Google accounts, add `?allowed_emails=a@x.com` to that app's middleware address. That also shuts `admin` out of that app, because local sessions have no email.
 
 ## Grafana dashboards (`grafana/`)
 
@@ -79,13 +85,17 @@ Dashboards are files: `grafana/dashboards/<folder>/*.json`. The folder is mounte
 | folder | what's in it |
 |---|---|
 | `platform/` | Traefik (requests, latency and errors per Ingress), oauth2-proxy (SSO checks, 401s and 403s), CoreDNS, API server, kubelet, cluster compute |
-| `infra/` | Kubernetes compute and networking by namespace, workload and pod; node exporter; Prometheus; Alertmanager; Grafana; Loki & Alloy health; Logs overview (filter by namespace and app, regex search); OpenTelemetry services (rate, errors, duration, service graph, traces) |
+| `infra/` | Kubernetes compute and networking by namespace, workload and pod; node exporter; Prometheus; Alertmanager; Grafana; Loki & Alloy health; OpenTelemetry services (rate, errors, duration, service graph, traces) |
 | `tools/` | Postgres (9628), Postgres top queries (pg_stat_statements), NATS server (2279), NATS JetStream (14725), Docker registry (9621), Knative (Serving autoscaling, requests, event deliveries) |
 | `apps/` | yours |
+| *(root)* `logs.json` | **Logs**, top level in Grafana: pod stdout **and** OpenTelemetry logs. Filter by namespace, app/service, **Sources** (tick pod stdout and/or OpenTelemetry) and regex search. Error lines: text match for stdout, severity for OTel. |
 
 **Developer workflow:**
 1. Build or edit a dashboard in the Grafana UI. Provisioned dashboards can be edited and saved there.
-2. Run `mise run grafana:export "My dashboard"` (a title search or a uid). It writes clean JSON to `grafana/dashboards/<folder>/<slug>.json`: the dashboard's current folder if it's one of the four, otherwise `apps/`. Pass a folder name to override.
+2. Run `mise run grafana:export "My dashboard"` (a title search or a uid). It writes clean JSON.
+   - A dashboard already provisioned from a file is updated **in place**.
+   - A new one goes to `grafana/dashboards/<folder>/<slug>.json`: its current Grafana folder if it's one of the four, otherwise `apps/`.
+   - Pass a folder to override; `root` means the top level.
 3. Commit the file. It's what Grafana loads from then on, on this cluster and any other built from the repo.
 
 The other tasks:
@@ -132,7 +142,7 @@ Alloy tags everything with the sending pod's `k8s.namespace.name`, `k8s.pod.name
 |---|---|---|
 | traces | **Tempo** (`20-5-tracing.yaml`, 72-hour retention, `runtime.data/tempo`) | Explore → Tempo, TraceQL `{resource.service.name="orders"}` |
 | metrics | Prometheus's native OTLP receiver. `job` = service name; namespace, pod and deployment become labels | any dashboard; resource attributes are in `target_info` |
-| logs | Loki's native OTLP endpoint. `service_name` and `k8s_*` are labels; `trace_id` and `span_id` are structured metadata | Explore → Loki, `{service_name="orders"}` |
+| logs | Loki's native OTLP endpoint. `service_name` and `k8s_*` are labels; `trace_id` and `span_id` are structured metadata | the **Logs** dashboard (Sources: OpenTelemetry), or Explore → Loki, `{service_name="orders"}` |
 
 **How the signals link up:**
 - **Trace → logs:** each span links to the Loki lines with the same trace ID.
@@ -239,7 +249,7 @@ oauth2-proxy needs a Google OAuth client ID and secret, plus a cookie secret.
 2. **Set up the consent screen.** Open **APIs & Services → OAuth consent screen**. This now lives under **Google Auth Platform**.
    - Under **Branding**, set the app name (`localdev`), a user support email and a developer contact email.
    - Under **Audience**, set the user type to **External** and the publishing status to **Testing**.
-   - Under **Test users**, add every Google account that should be able to sign in. In Testing mode, only these accounts can log in, with a maximum of 100. The per-app allow-lists in the cluster narrow this further.
+   - Under **Test users**, add every Google account that should be able to sign in. In Testing mode, only these accounts can log in, with a maximum of 100. The cluster's allow-list (`10-2-oauth2-proxy.yaml`) narrows this further.
    - No scopes need adding. oauth2-proxy only asks for `openid email profile`, which are non-sensitive, so Google doesn't need to verify the app.
 
 3. **Create the client.** Go to **Google Auth Platform → Clients → Create client**.
@@ -262,6 +272,7 @@ oauth2-proxy needs a Google OAuth client ID and secret, plus a cookie secret.
    GOOGLE_CLIENT_ID=xxxxxxxx.apps.googleusercontent.com
    GOOGLE_CLIENT_SECRET=GOCSPX-xxxxxxxx
    COOKIE_SECRET=xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx=
+   LOCAL_ADMIN_PASSWORD=choose-one     # local "admin" login (sign-in page form, Grafana)
    ```
 
 7. **Encrypt it and commit only the `.asc`:**
@@ -269,4 +280,4 @@ oauth2-proxy needs a Google OAuth client ID and secret, plus a cookie secret.
    mise run encrypt secrets.env    # -> secrets.env.asc
    git add secrets.env.asc
    ```
-   `mise run create` decrypts `secrets.env.asc` automatically when `secrets.env` is missing. The passphrase is `$PASSPHRASE_FILE`, which defaults to `~/.ssh/id_ed25519`.
+   `mise run create` (via `mise run secrets`) decrypts `secrets.env.asc` automatically when `secrets.env` is missing or older than it, and checks all four keys are set. Save `secrets.env` before encrypting: the encrypt task reads the file on disk. The passphrase is `$PASSPHRASE_FILE`, which defaults to `~/.ssh/id_ed25519`.

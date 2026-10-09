@@ -27,6 +27,8 @@ spec:
 
     grafana:
       fullnameOverride: grafana
+      admin:
+        existingSecret: grafana-admin     # from `mise run secrets` (admin / LOCAL_ADMIN_PASSWORD)
       defaultDashboardsEnabled: false   # copies live in grafana/dashboards/{platform,infra}
       # Dashboards come from grafana/dashboards/<folder>/*.json in the repo (mounted into the
       # server node at /grafana-dashboards by k3d.yaml): one Grafana folder per directory,
@@ -61,7 +63,9 @@ spec:
           root_url: "%(protocol)s://%(domain)s/grafana/"
           serve_from_sub_path: true
         auth:
-          disable_login_form: true
+          # Google sessions arrive with X-Auth-Request-Email (auth.proxy, no form). Local "admin"
+          # SSO sessions have no email, so Grafana shows its form: admin / LOCAL_ADMIN_PASSWORD.
+          disable_login_form: false
           disable_signout_menu: true
         auth.proxy:
           enabled: true
@@ -155,7 +159,7 @@ metadata:
   namespace: monitoring
 spec:
   forwardAuth:
-    address: http://oauth2-proxy.auth.svc.cluster.local/oauth2/auth?allowed_emails=bemowski@gmail.com
+    address: http://oauth2-proxy.auth.svc.cluster.local/oauth2/auth   # allow-list: 10-2-oauth2-proxy.yaml
     authResponseHeaders: [X-Auth-Request-Email, X-Auth-Request-User]
 ---
 apiVersion: networking.k8s.io/v1

@@ -1,0 +1,291 @@
+{
+  "description": "All logs in Loki: pod stdout (Alloy tails every container) and OpenTelemetry logs apps send via OTLP. Filter by namespace, app/service, source and regex. Error lines: stdout by text match (?i)(error|exception|fatal|panic|level=(err|crit)), OpenTelemetry by severity.",
+  "editable": true,
+  "panels": [
+    {
+      "datasource": {
+        "type": "loki",
+        "uid": "loki"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "bars",
+            "fillOpacity": 60,
+            "lineWidth": 0,
+            "stacking": {
+              "mode": "normal"
+            }
+          },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 0
+      },
+      "id": 1,
+      "options": {
+        "legend": {
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ],
+          "displayMode": "table",
+          "placement": "right"
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "loki",
+            "uid": "loki"
+          },
+          "expr": "sum by (namespace) (count_over_time({namespace=~\"$namespace\", service_name=~\"$service\", job=\"loki.source.kubernetes.pods\"} |~ \"$search\" | label_format log_source=\"stdout\" | log_source=~\"${source:regex}\" [$__auto]))",
+          "legendFormat": "{{namespace}}",
+          "queryType": "range",
+          "refId": "A"
+        },
+        {
+          "datasource": {
+            "type": "loki",
+            "uid": "loki"
+          },
+          "expr": "sum by (k8s_namespace_name) (count_over_time({k8s_namespace_name=~\"$namespace\", service_name=~\"$service\"} |~ \"$search\" | label_format log_source=\"otel\" | log_source=~\"${source:regex}\" [$__auto]))",
+          "legendFormat": "{{k8s_namespace_name}} (otel)",
+          "queryType": "range",
+          "refId": "B"
+        }
+      ],
+      "title": "Log lines by namespace",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "loki",
+        "uid": "loki"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "bars",
+            "fillOpacity": 60,
+            "lineWidth": 0,
+            "stacking": {
+              "mode": "normal"
+            }
+          },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 0
+      },
+      "id": 2,
+      "options": {
+        "legend": {
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ],
+          "displayMode": "table",
+          "placement": "right"
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "loki",
+            "uid": "loki"
+          },
+          "expr": "sum by (service_name) (count_over_time({namespace=~\"$namespace\", service_name=~\"$service\", job=\"loki.source.kubernetes.pods\"} |~ \"$search\" | label_format log_source=\"stdout\" | log_source=~\"${source:regex}\" |~ \"(?i)(error|exception|fatal|panic|level=(err|crit))\" [$__auto]))",
+          "legendFormat": "{{service_name}}",
+          "queryType": "range",
+          "refId": "A"
+        },
+        {
+          "datasource": {
+            "type": "loki",
+            "uid": "loki"
+          },
+          "expr": "sum by (service_name) (count_over_time({k8s_namespace_name=~\"$namespace\", service_name=~\"$service\"} |~ \"$search\" | label_format log_source=\"otel\" | log_source=~\"${source:regex}\" | detected_level=~\"(?i)(error|fatal|critical|crit|emergency|alert)\" [$__auto]))",
+          "legendFormat": "{{service_name}} (otel)",
+          "queryType": "range",
+          "refId": "B"
+        }
+      ],
+      "title": "Error lines by app / service",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "loki",
+        "uid": "loki"
+      },
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 18,
+        "w": 24,
+        "x": 0,
+        "y": 8
+      },
+      "id": 3,
+      "options": {
+        "dedupStrategy": "none",
+        "enableLogDetails": true,
+        "prettifyLogMessage": false,
+        "showCommonLabels": false,
+        "showLabels": false,
+        "showTime": true,
+        "sortOrder": "Descending",
+        "wrapLogMessage": true
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "loki",
+            "uid": "loki"
+          },
+          "expr": "{namespace=~\"$namespace\", service_name=~\"$service\", job=\"loki.source.kubernetes.pods\"} |~ \"$search\" | label_format log_source=\"stdout\" | log_source=~\"${source:regex}\"",
+          "queryType": "range",
+          "refId": "stdout"
+        },
+        {
+          "datasource": {
+            "type": "loki",
+            "uid": "loki"
+          },
+          "expr": "{k8s_namespace_name=~\"$namespace\", service_name=~\"$service\"} |~ \"$search\" | label_format log_source=\"otel\" | log_source=~\"${source:regex}\"",
+          "queryType": "range",
+          "refId": "otel"
+        }
+      ],
+      "title": "Logs",
+      "type": "logs"
+    }
+  ],
+  "refresh": "30s",
+  "schemaVersion": 39,
+  "tags": [
+    "localdev",
+    "logs"
+  ],
+  "templating": {
+    "list": [
+      {
+        "allValue": ".+",
+        "current": {
+          "text": "All",
+          "value": "$__all"
+        },
+        "datasource": {
+          "type": "loki",
+          "uid": "loki"
+        },
+        "definition": "label_values(namespace)",
+        "includeAll": true,
+        "label": "Namespace",
+        "multi": true,
+        "name": "namespace",
+        "query": {
+          "label": "namespace",
+          "refId": "ns",
+          "type": 1
+        },
+        "refresh": 2,
+        "sort": 1,
+        "type": "query"
+      },
+      {
+        "allValue": ".+",
+        "current": {
+          "text": "All",
+          "value": "$__all"
+        },
+        "datasource": {
+          "type": "loki",
+          "uid": "loki"
+        },
+        "definition": "label_values(service_name)",
+        "includeAll": true,
+        "label": "App / service",
+        "multi": true,
+        "name": "service",
+        "query": {
+          "label": "service_name",
+          "refId": "svc",
+          "type": 1
+        },
+        "refresh": 2,
+        "sort": 1,
+        "type": "query"
+      },
+      {
+        "current": {
+          "text": [
+            "pod stdout",
+            "OpenTelemetry"
+          ],
+          "value": [
+            "stdout",
+            "otel"
+          ]
+        },
+        "description": "pod stdout = container output collected by Alloy; OpenTelemetry = logs apps send via OTLP",
+        "includeAll": false,
+        "label": "Sources",
+        "multi": true,
+        "name": "source",
+        "options": [
+          {
+            "selected": true,
+            "text": "pod stdout",
+            "value": "stdout"
+          },
+          {
+            "selected": true,
+            "text": "OpenTelemetry",
+            "value": "otel"
+          }
+        ],
+        "query": "pod stdout : stdout, OpenTelemetry : otel",
+        "type": "custom"
+      },
+      {
+        "current": {
+          "value": ""
+        },
+        "label": "Search (regex)",
+        "name": "search",
+        "query": "",
+        "type": "textbox"
+      }
+    ]
+  },
+  "time": {
+    "from": "now-1h",
+    "to": "now"
+  },
+  "timezone": "browser",
+  "title": "Logs",
+  "uid": "localdev-logs",
+  "id": null
+}

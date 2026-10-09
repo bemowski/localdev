@@ -109,7 +109,7 @@ metadata:
   namespace: nats
 spec:
   forwardAuth:
-    address: http://oauth2-proxy.auth.svc.cluster.local/oauth2/auth?allowed_emails=bemowski@gmail.com
+    address: http://oauth2-proxy.auth.svc.cluster.local/oauth2/auth   # allow-list: 10-2-oauth2-proxy.yaml
     authResponseHeaders: [X-Auth-Request-Email, X-Auth-Request-User]
 ---
 # /nats -> /nats/ so NUI's relative asset, ./api/ and websocket paths resolve under the prefix

@@ -1,5 +1,10 @@
-# oauth2-proxy (Google) — one proxy, per-app allow-lists via forwardAuth ?allowed_emails=
-# Secret auth/oauth2-proxy (client-id, client-secret, cookie-secret) is created by `mise run create`.
+# oauth2-proxy: one SSO gate for every app (Traefik forwardAuth -> /oauth2/auth).
+# Two ways to sign in, on one page:
+#   - Google, for accounts in the allow-list below (authenticatedEmailsFile)
+#   - local user "admin" (htpasswd), password LOCAL_ADMIN_PASSWORD from secrets.env
+# Secrets auth/oauth2-proxy and auth/oauth2-proxy-htpasswd come from `mise run secrets`.
+# Local (htpasswd) sessions have no email: the allow-list doesn't apply to them, and apps
+# keyed on the email header (Grafana) show their own login instead.
 apiVersion: helm.cattle.io/v1
 kind: HelmChart
 metadata:
@@ -13,15 +18,27 @@ spec:
   valuesContent: |-
     config:
       existingSecret: oauth2-proxy
-      emailDomains: ["*"]          # narrowed per app by allowed_emails
+      emailDomains: []             # no domain-wide access: only the allow-list below
       upstreams: ["static://202"]
+    # Google accounts allowed into localdev (one per line). Applies to every app.
+    authenticatedEmailsFile:
+      enabled: true
+      restricted_access: |-
+        bemowski@gmail.com
+    htpasswdFile:
+      enabled: true
+      existingSecret: oauth2-proxy-htpasswd
     extraArgs:
       provider: google
       redirect-url: http://localhost/oauth2/callback
       reverse-proxy: true
       cookie-secure: false
       set-xauthrequest: true
-      skip-provider-button: true
+      skip-provider-button: false  # sign-in page: Google button + username/password form
+      display-htpasswd-form: true
+      custom-sign-in-logo: "-"      # no logo
+      banner: "localdev"
+      footer: "-"
       whitelist-domain: localhost
 ---
 apiVersion: networking.k8s.io/v1

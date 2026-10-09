@@ -7,6 +7,7 @@ tree, the running Grafana and grafana.com:
 
   list                         dashboards in Grafana (folder, uid, title, file-provisioned?)
   export <uid|search> [folder] Grafana -> grafana/dashboards/<folder>/<slug>.json
+                               (default: the file it's provisioned from; "root" = top level)
   import <file|dir> [folder]   JSON file(s) -> grafana/dashboards/<folder>/ (normalized)
   fetch <gnet-id> <folder>     grafana.com dashboard -> grafana/dashboards/<folder>/
 
@@ -69,10 +70,20 @@ def normalize(dash, fallback_uid=None):
     return dash
 
 
-def write(dash, folder):
-    if folder not in FOLDERS:
+def provisioned_file(uid):
+    """The file under ROOT a dashboard uid is provisioned from, if any."""
+    for f in ROOT.rglob("*.json"):
+        if json.loads(f.read_text()).get("uid") == uid:
+            return f
+    return None
+
+
+def write(dash, folder, out=None):
+    if folder == "root":       # top level of the tree = Grafana's root "Dashboards" list
+        folder = "."
+    if folder not in FOLDERS + (".",):
         print(f"  note: '{folder}' is not one of {FOLDERS}; it becomes its own Grafana folder")
-    out = ROOT / folder / f"{slug(dash.get('title', dash['uid']))}.json"
+    out = out or ROOT / folder / f"{slug(dash.get('title', dash['uid']))}.json"
     # Grafana can't provision two files with one uid: a dashboard lives in exactly one place
     for other in ROOT.rglob("*.json"):
         if other.resolve() != out.resolve() and json.loads(other.read_text()).get("uid") == dash["uid"]:
@@ -104,6 +115,10 @@ def cmd_export(args):
             print(f"  {h['uid']:40} {h.get('folderTitle', 'General'):10} {h['title']}")
         sys.exit(1)
     data = grafana(f"/api/dashboards/uid/{hits[0]['uid']}")
+    existing = provisioned_file(hits[0]["uid"])
+    if existing and not folder:   # already a file: update it in place
+        write(normalize(data["dashboard"]), "", out=existing)
+        return
     current = (data["meta"].get("folderTitle") or "").lower()
     folder = folder or (current if current in FOLDERS else "apps")
     write(normalize(data["dashboard"]), folder)
