@@ -112,7 +112,18 @@
   .total { font: 600 13px ui-monospace, SFMono-Regular, Menlo, monospace; }
   .total-label { color: var(--muted); font: 12px system-ui, sans-serif; margin-right: 4px; }
   .total-sep { color: var(--muted); margin: 0 6px; }
-  .updated { color: var(--muted); font-size: 12px; margin-bottom: 18px; }
+  .updated-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 6px; }
+  .updated { color: var(--muted); font-size: 12px; }
+  .refresh {
+    font: 15px/1 system-ui, sans-serif; color: var(--muted); background: none; cursor: pointer;
+    border: 1px solid var(--border); border-radius: 6px; width: 26px; height: 24px; padding: 0;
+  }
+  .refresh:hover, .refresh:focus-visible { color: var(--accent); border-color: var(--accent); outline: none; }
+  .refresh.spinning { animation: spin .7s linear infinite; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  /* time left until the next automatic refresh */
+  .countdown { height: 3px; border-radius: 2px; background: var(--border); overflow: hidden; margin-bottom: 16px; }
+  .countdown-bar { height: 100%; width: 100%; background: var(--accent); opacity: .7; }
 
   .group {
     margin-bottom: 14px;
@@ -128,13 +139,19 @@
   .group.red { border-left-color: var(--red); }
   .group-head {
     display: flex; align-items: center; gap: 8px;
-    padding: 9px 12px;
+    padding: 9px 12px; cursor: pointer; user-select: none;
     background: color-mix(in srgb, var(--panel) 60%, var(--card));
     border-bottom: 1px solid var(--border);
   }
   .group-name { font-size: 13px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; }
   .group-count { color: var(--muted); font-size: 12px; }
   .group-mem { margin-left: auto; font: 600 12px ui-monospace, SFMono-Regular, Menlo, monospace; }
+  .chevron { color: var(--muted); font-size: 11px; width: 10px; transition: transform .15s ease; }
+  .group.collapsed .chevron { transform: rotate(-90deg); }
+  .group.collapsed .group-head { border-bottom: 0; }
+  .group.collapsed .rows { display: none; }
+  .group.forced .group-head { cursor: default; }       /* not all green: always open */
+  .group.forced .chevron { visibility: hidden; }
   .rows { padding: 4px 4px; }
   a.row, div.row {
     display: grid;
@@ -183,7 +200,11 @@
       <h2>Status</h2>
       <span class="total" id="total"></span>
     </div>
-    <div class="updated" id="updated">loading…</div>
+    <div class="updated-row">
+      <span class="updated" id="updated">loading…</span>
+      <button class="refresh" id="refresh" title="Refresh now" aria-label="Refresh status now">↻</button>
+    </div>
+    <div class="countdown"><div class="countdown-bar" id="countdown"></div></div>
     <div id="status"></div>
   </aside>
 </div>
@@ -258,6 +279,15 @@
     return mi >= 1024 ? `${(mi / 1024).toFixed(2)} GiB` : `${Math.round(mi)} MiB`;
   }
 
+  // collapsed groups, remembered per browser (best effort: storage may be unavailable)
+  function loadCollapsed() {
+    try { return new Set(JSON.parse(localStorage.getItem('cnav.collapsed') || '[]')); } catch { return new Set(); }
+  }
+  function saveCollapsed(set) {
+    try { localStorage.setItem('cnav.collapsed', JSON.stringify([...set])); } catch {}
+  }
+  const collapsed = loadCollapsed();
+
   function renderStatus(data) {
     const box = document.getElementById('status');
     box.replaceChildren();
@@ -272,10 +302,24 @@
     }
     for (const g of data.groups) {
       const group = el('section', `group ${g.state}`);
+      // a group with anything amber/red is always open, so problems are never hidden
+      const forced = g.state !== 'green';
+      if (forced) group.classList.add('forced');
+      else if (collapsed.has(g.group)) group.classList.add('collapsed');
       const head = el('div', 'group-head');
-      head.append(el('span', `dot ${g.state}`), el('span', 'group-name', g.group),
+      head.append(el('span', 'chevron', '▾'), el('span', `dot ${g.state}`), el('span', 'group-name', g.group),
                   el('span', 'group-count', `${g.items.length}`), el('span', 'group-mem', fmtMem(g.mem)));
-      head.title = `${g.group}: ${fmtMem(g.mem)} working-set memory across ${g.items.length} items`;
+      head.title = `${g.group}: ${fmtMem(g.mem)} working-set memory across ${g.items.length} items` +
+        (forced ? ' - kept open: not all green' : ' - click to collapse/expand');
+      head.setAttribute('role', 'button');
+      head.setAttribute('aria-expanded', String(!group.classList.contains('collapsed')));
+      head.addEventListener('click', () => {
+        if (forced) return;
+        const now = group.classList.toggle('collapsed');
+        head.setAttribute('aria-expanded', String(!now));
+        if (now) collapsed.add(g.group); else collapsed.delete(g.group);
+        saveCollapsed(collapsed);
+      });
       const rows = el('div', 'rows');
       for (const i of g.items) {
         const row = el(i.link ? 'a' : 'div', 'row');
@@ -294,10 +338,26 @@
       box.append(group);
     }
     const t = new Date(data.updated);
-    document.getElementById('updated').textContent = `updated ${t.toLocaleTimeString()} · every ${REFRESH_MS / 1000}s`;
+    document.getElementById('updated').textContent = `updated ${t.toLocaleTimeString()}`;
   }
 
+  // countdown bar: full width, then shrinks to nothing over REFRESH_MS
+  function startCountdown() {
+    const bar = document.getElementById('countdown');
+    bar.style.transition = 'none';
+    bar.style.width = '100%';
+    void bar.offsetWidth;                       // commit the reset before animating
+    bar.style.transition = `width ${REFRESH_MS}ms linear`;
+    bar.style.width = '0%';
+  }
+
+  let timer = null, inFlight = false;
   async function refreshStatus() {
+    if (inFlight) return;
+    inFlight = true;
+    clearTimeout(timer);
+    const btn = document.getElementById('refresh');
+    btn.classList.add('spinning');
     try {
       const r = checkAuth(await fetch('api/status', { cache: 'no-store' }));
       const data = await r.json();
@@ -305,10 +365,15 @@
       renderStatus(data);
     } catch (err) {
       document.getElementById('updated').textContent = `status unavailable: ${err.message}`;
+    } finally {
+      inFlight = false;
+      btn.classList.remove('spinning');
+      timer = setTimeout(refreshStatus, REFRESH_MS);   // next automatic refresh, counted from now
+      startCountdown();
     }
   }
+  document.getElementById('refresh').addEventListener('click', refreshStatus);
   refreshStatus();
-  setInterval(refreshStatus, REFRESH_MS);
 </script>
 </body>
 </html>
