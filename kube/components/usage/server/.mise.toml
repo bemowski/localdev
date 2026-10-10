@@ -1,0 +1,28 @@
+# usage server: a deployable component (manifests/, docker/, build.sh). FastAPI + psycopg; validates
+# requests against ../openapi.yaml and writes Postgres.
+#   mise run test    unit tests + API tests (API tests need Postgres: USAGE_TEST_ADMIN_URL,
+#                    default localdev's postgresql://app:localdev@localhost:5432/app; skipped if unreachable)
+#   mise run dev     run locally on :8080 against localdev's Postgres (database `usage`, created in-cluster)
+#   mise run image   build the image (IMAGE=usage-server:dev); in localdev: `mise run build usage`
+
+[tools]
+uv = '0.12.24'
+
+[env]
+_UV_RUN = "uv run --no-project --python 3.13 --with-requirements docker/requirements.txt"
+
+[tasks.test]
+description = "Run the server tests"
+dir = "{{config_root}}"
+run = "$_UV_RUN --with-requirements requirements-dev.txt pytest -q"
+
+[tasks.dev]
+description = "Run the server locally against localdev's Postgres"
+dir = "{{config_root}}/docker"
+env = { PGHOST = "localhost", PGPORT = "5432", PGDATABASE = "usage", PGUSER = "usage", PGPASSWORD = "usage", USAGE_METRICS_PORT = "9091", USAGE_SPEC = "{{config_root}}/../openapi.yaml" }
+run = "uv run --no-project --python 3.13 --with-requirements requirements.txt python -m usage_server"
+
+[tasks.image]
+description = "Build the server image"
+dir = "{{config_root}}"
+run = "./build.sh"

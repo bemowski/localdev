@@ -1,0 +1,9 @@
+extends:
+  - recommended
+rules:
+  # write-only internal API: no auth yet (see readme)
+  security-defined: off
+  # the localdev server really is http://localhost/usage/api
+  no-server-example.com: off
+  # /healthz and /openapi.yaml take no input, so have no client errors; /v1/events has 400/413/422
+  operation-4xx-response: off

@@ -1,0 +1,51 @@
+# usage: tool-usage events. Self-contained (no dependency on localdev, which only deploys server/).
+# Layout: openapi.yaml (the contract), server/, client/.
+#   mise run api:lint     lint openapi.yaml (Redocly)
+#   mise run api:check    validate examples/ and the spec's inline examples against the schemas
+#   mise run api:docs     render the spec to build/api.html
+#   mise run api:test     lint + check
+#   mise run server:test | server:image | server:dev   (delegate to server/.mise.toml)
+
+[tools]
+node = '22.23.2'   # npx @redocly/cli
+uv = '0.12.24'     # uvx/uv run for the example checker (jsonschema)
+
+[env]
+REDOCLY_VERSION = "2.54.2"
+REDOCLY_TELEMETRY = "off"
+REDOCLY_SUPPRESS_UPDATE_NOTICE = "true"
+
+[tasks."api:lint"]
+description = "Lint openapi.yaml"
+dir = "{{config_root}}"
+run = 'npx -y "@redocly/cli@$REDOCLY_VERSION" lint openapi.yaml'
+
+[tasks."api:check"]
+description = "Validate examples/ (valid and invalid) and inline spec examples"
+dir = "{{config_root}}"
+run = "uv run --no-project --python 3.12 --with 'jsonschema[format]==4.26.0' --with pyyaml==6.0.3 python scripts/check_examples.py"
+
+[tasks."api:docs"]
+description = "Render the spec to build/api.html"
+dir = "{{config_root}}"
+run = 'npx -y "@redocly/cli@$REDOCLY_VERSION" build-docs openapi.yaml -o build/api.html && echo "file://{{config_root}}/build/api.html"'
+
+[tasks."api:test"]
+description = "Lint the spec and check the examples"
+depends = ["api:lint", "api:check"]
+
+# server/ has its own .mise.toml; these delegate to it
+[tasks."server:test"]
+description = "Run the server tests (server/)"
+dir = "{{config_root}}/server"
+run = "mise run test"
+
+[tasks."server:image"]
+description = "Build the server image (server/build.sh)"
+dir = "{{config_root}}/server"
+run = "mise run image"
+
+[tasks."server:dev"]
+description = "Run the server locally against localdev's Postgres"
+dir = "{{config_root}}/server"
+run = "mise run dev"
