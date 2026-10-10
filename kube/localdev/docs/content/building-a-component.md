@@ -174,6 +174,14 @@ Recipes, each a complete `build.sh` after `#!/bin/bash` and `set -euo pipefail`:
 `cluster:create` runs the build for every enabled component that has one, and `cluster:profile`
 for each component it adds.
 
+!!! note "Apple Silicon (arm64)"
+    The cluster runs on the host's CPU architecture: arm64 on an Apple Silicon Mac, amd64 elsewhere.
+    `docker build` builds for the host automatically, but some tools build amd64 unless told
+    otherwise, and the pod then fails with `exec format error`. With **Jib**, set
+    `jib.from.platforms` to `linux/arm64` (or both). With **ko**, pass `--platform=linux/arm64`, or
+    `linux/amd64,linux/arm64`. Use multi-arch base images, and don't pin `--platform=linux/amd64`
+    in a Dockerfile. See [Platform notes](platform-notes.md).
+
 ### A family of services
 
 For a UI and a few APIs, one component can hold them all: one manifest per service (or one file),

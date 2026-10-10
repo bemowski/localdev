@@ -1,0 +1,2 @@
+# bash scripts (mise tasks, build.sh) break on CRLF - keep LF even in a Windows checkout
+* text=auto eol=lf

@@ -22,16 +22,18 @@ Ephemeral local Kubernetes (k3d) with path-based routing on `http://localhost/<a
 
 ## Prerequisites
 
-- **Docker.** On Linux, your user must be in the `docker` group. On WSL2, use Docker Desktop with WSL integration or native Docker inside WSL. On macOS, use Docker Desktop, OrbStack or Colima.
-- **Free host ports:** 80 (ingress), 5005 (local registry `localdev-registry`), and 5432 / 4222 on 127.0.0.1 (Postgres / NATS). Check with `ss -ltn`. On Linux, binding port 80 works because Docker does it as root.
-- **About 4 GB of RAM free for Docker.**
-- **Linux: raise the inotify limits.** Every k3d node shares the host kernel, and following container logs (Alloy → Loki) uses one inotify instance per stream. The default of 128 runs out, and pods then log `failed to create fsnotify watcher: too many open files` instead of their real output. Raise it once:
+Supported platforms: **Linux**, **macOS with Rancher Desktop** (Intel or Apple Silicon), and **Windows in WSL2 with Docker Engine installed inside the distro** (not Docker Desktop). The per-platform setup is in [Getting started](docs/content/getting-started.md), and the quirks are in [Platform notes](docs/content/platform-notes.md).
+
+- **Docker.** On Linux and WSL, your user must be in the `docker` group. On macOS, Rancher Desktop with the `dockerd (moby)` engine and its own Kubernetes turned off.
+- **Free host ports:** 80 (ingress), 5005 (local registry `localdev-registry`), and 5432 / 4222 on 127.0.0.1 (Postgres / NATS). Check with `ss -ltnp` (Linux, WSL) or `lsof -nP -iTCP -sTCP:LISTEN` (macOS).
+- **About 6 GB of memory for Docker.**
+- **Linux and WSL: raise the inotify limits.** Every k3d node shares the host kernel, and following container logs (Alloy → Loki) uses one inotify instance per stream. The default of 128 runs out, and pods then log `failed to create fsnotify watcher: too many open files` instead of their real output. Raise it once:
   ```bash
   printf 'fs.inotify.max_user_instances=1024\nfs.inotify.max_user_watches=1048576\n' | sudo tee /etc/sysctl.d/99-localdev.conf
   sudo sysctl --system
   ```
-  Docker Desktop and OrbStack on macOS and WSL2 run their own VM kernels, and usually already allow more.
-- **mise.** Run `mise install` in this directory to get k3d, kubectl, kn and Python.
+- **mise.** Run `mise install` in this directory to get k3d, kubectl, kn, yq and Python.
+- **git, curl, gpg.** gpg is only needed to decrypt `secrets.store.toml.asc`.
 - **`secrets.store.toml` or `secrets.store.toml.asc`**: your secrets (Google OAuth client, cookie secret, admin password), from the Google OAuth setup below. All secrets are mastered in the secret store and synced by External Secrets: see the docs ([Secrets](docs/content/secrets.md)). Have an old `secrets.env`? `mise run secrets:migrate` converts it.
 
 ## Usage

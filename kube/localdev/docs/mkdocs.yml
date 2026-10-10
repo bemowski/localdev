@@ -9,6 +9,7 @@ nav:
   - Home: index.md
   - Concepts: concepts.md
   - Getting started: getting-started.md
+  - Platform notes: platform-notes.md
   - Moving from Docker Compose: from-docker-compose.md
   - Cluster layout: cluster-layout.md
   - Components: components.md

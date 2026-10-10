@@ -10,6 +10,7 @@ k3d = '5.9.0'
 kubectl = '1.37.1'   # overrides root 1.27
 kn = 'knative-v1.23.0'   # Knative CLI (kn service create/list, kn broker, kn trigger)
 python = '3.12.15'       # profile.py, grafana/dashtool.py, realmtool.py (stdlib only; tomllib needs 3.11+)
+yq = '4.54.1'            # cluster:profile (don't rely on the monorepo root's toolchain)
 
 [env]
 CLUSTER_NAME = "localdev"
@@ -367,7 +368,7 @@ done <<< "$removed"
 # k3s skips a file whose path+mtime it has seen before - even if we deleted its objects since -
 # so give re-added components' manifests a fresh mtime (content and git are unaffected)
 missing=$(python3 profile.py missing $(kubectl -n kube-system get addon -o jsonpath='{.items[*].metadata.name}'))
-if [ -n "$missing" ]; then cut -f2 <<< "$missing" | xargs -d '\n' touch; fi
+if [ -n "$missing" ]; then cut -f2 <<< "$missing" | while IFS= read -r f; do touch "$f"; done; fi
 # newly enabled components with an image (build.sh or docker/): build it (until then ImagePullBackOff)
 for c in $(python3 profile.py buildable); do
     if cut -f1 <<< "$missing" | grep -qx "$c"; then mise run build "$c"; fi
