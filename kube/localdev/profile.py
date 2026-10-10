@@ -7,11 +7,11 @@ the real files stay live:
 
   runtime.profile/name          current profile
   runtime.profile/components    enabled components, one per line (-> cnav ConfigMap)
-  runtime.profile/manifests/    mounted as k3s's manifests dir: a DIRECTORY link per always-on
-                                layer (10-platform, 20-infra, 50-apps) and a real 30-tools/ folder
-                                with a directory link per enabled component (k3s follows dir links
-                                and sees edits; absolute targets - the repo is mounted inside the
-                                node at the same path)
+  runtime.profile/manifests/    mounted as k3s's manifests dir: a real folder per layer
+                                (10-platform, 20-infra, 30-tools, 50-apps) holding DIRECTORY links -
+                                core -> manifests/<layer>, <component> -> components/<c>/manifests
+                                (k3s follows dir links and sees edits; absolute targets - the repo
+                                is mounted inside the node at the same path)
   runtime.profile/dashboards/   Grafana's provider path; real folders with FILE links (Grafana
                                 follows file links, not dir links); relative targets, valid on the
                                 host and in the Grafana pod (repo mounted at /localdev)
@@ -23,6 +23,7 @@ the real files stay live:
   removed <to> [addons] manifest files to delete to reach <to>: components still deployed
                         (their AddOns exist) but not in <to>; dependents first, files reversed
   missing [addons]      manifest files of enabled components not yet deployed (to touch)
+  buildable             enabled components with a docker/ folder (images to build)
   check                 validate profiles.toml and components/
 """
 import os
@@ -35,7 +36,9 @@ HERE = Path(__file__).resolve().parent
 CONFIG = HERE / "profiles.toml"
 COMPONENTS = HERE / "components"
 VIEW = HERE / "runtime.profile"
-LAYERS = ["10-platform", "20-infra", "50-apps"]   # manifests/<layer>, always deployed
+# layer -> folder in runtime.profile/manifests/ (sorted = deploy order). manifests/<folder>/ holds the
+# always-on files of a layer, linked as <folder>/core; components land in their layer's folder.
+LAYERS = {"platform": "10-platform", "infra": "20-infra", "tools": "30-tools", "apps": "50-apps"}
 DASHBOARDS = HERE / "grafana" / "dashboards"      # always-on dashboards (platform, infra, apps, root)
 
 
@@ -51,14 +54,23 @@ def components_on_disk():
     return sorted(p.name for p in COMPONENTS.iterdir() if (p / "manifests").is_dir())
 
 
+def meta(cfg, c):
+    return cfg.get("components", {}).get(c, {})
+
+
+def always(cfg):
+    return [c for c in components_on_disk() if meta(cfg, c).get("always")]
+
+
 def resolve(name, cfg=None):
-    """Components of a profile, with `requires` added (returns (list, auto-added))."""
+    """Components of a profile: its list + `always` components + `requires` (returns (list, auto-added))."""
     cfg = cfg or config()
     profiles = cfg.get("profiles", {})
     if name not in profiles:
         die(f"unknown profile '{name}' (have: {', '.join(profiles)})")
     known = set(components_on_disk())
     wanted, added = list(profiles[name].get("components", [])), []
+    wanted += [c for c in always(cfg) if c not in wanted]
     i = 0
     while i < len(wanted):
         c = wanted[i]
@@ -99,14 +111,16 @@ def link(name):
             else:
                 shutil.rmtree(entry)
     m = VIEW / "manifests"
-    for layer in LAYERS:
-        (m / layer).symlink_to(HERE / "manifests" / layer, target_is_directory=True)
-    # 30-tools/ is a real folder (sorts between infra and apps) with a DIRECTORY link per enabled
-    # component: 30-tools/postgres -> components/postgres/manifests. k3s follows links at any depth
-    # of the real tree and sees edits through dir links (not through file links).
-    (m / "30-tools").mkdir()
+    # each layer is a real folder with DIRECTORY links: <layer>/core -> manifests/<layer> (the
+    # always-on files) and <layer>/<component> -> components/<component>/manifests. k3s follows links
+    # at any depth of the real tree and sees edits through dir links (not through file links).
+    for layer, folder in LAYERS.items():
+        (m / folder).mkdir()
+        if (HERE / "manifests" / folder).is_dir():
+            (m / folder / "core").symlink_to(HERE / "manifests" / folder, target_is_directory=True)
     for c in comps:
-        (m / "30-tools" / c).symlink_to(COMPONENTS / c / "manifests", target_is_directory=True)
+        folder = LAYERS[meta(cfg, c).get("layer", "tools")]
+        (m / folder / c).symlink_to(COMPONENTS / c / "manifests", target_is_directory=True)
     d = VIEW / "dashboards"
 
     def link_file(src, dst):
@@ -122,11 +136,13 @@ def link(name):
     (VIEW / "components").write_text("".join(f"{c}\n" for c in comps))
     n_dash = sum(1 for _ in d.rglob("*.json"))
     print(f"  profile {name}: components [{', '.join(comps) or '-'}]; "
-          f"{len(LAYERS)} layers + {len(comps)} tools in 30-tools/, {n_dash} dashboards -> {VIEW.relative_to(HERE)}/")
+          f"{n_dash} dashboards -> {VIEW.relative_to(HERE)}/")
 
 
 def cmd_list(_):
     cfg, cur = config(), current()
+    if always(cfg):
+        print(f"   (every profile also includes: {', '.join(always(cfg))})")
     for name, p in cfg.get("profiles", {}).items():
         comps, _ = resolve(name, cfg)
         mark = "*" if name == cur else " "
@@ -171,6 +187,9 @@ def cmd_missing(args):
 
 def cmd_check(_):
     cfg, problems = config(), []
+    for c, m in cfg.get("components", {}).items():
+        if m.get("layer", "tools") not in LAYERS:
+            problems.append(f"[components.{c}] layer '{m['layer']}' is not one of {', '.join(LAYERS)}")
     if cfg.get("default") not in cfg.get("profiles", {}):
         problems.append(f"default profile '{cfg.get('default')}' is not defined")
     for c in cfg.get("components", {}):
@@ -208,6 +227,9 @@ def main():
         sys.exit(0 if args and args[0] in comps else 1)
     elif cmd == "removed":
         cmd_removed(args)
+    elif cmd == "buildable":
+        comps = (VIEW / "components").read_text().split() if (VIEW / "components").exists() else []
+        print("\n".join(c for c in comps if (COMPONENTS / c / "docker").is_dir()))
     elif cmd == "missing":
         cmd_missing(args)
     elif cmd == "check":

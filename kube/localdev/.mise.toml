@@ -1,6 +1,6 @@
 # kube/localdev — ephemeral local kubernetes (k3d)
 #   cluster:  mise run cluster:create [profile] | cluster:profile [profile] | cluster:status | cluster:destroy | cluster:recreate | cluster:secrets | cluster:clean
-#   apps/tools: mise run build <app> | pg:forward | pg:psql | kn:forward | keycloak:apply | keycloak:export
+#   components/tools: mise run build <component> | pg:forward | pg:psql | kn:forward | keycloak:apply | keycloak:export
 #   mise run grafana:list | grafana:export | grafana:import | grafana:fetch   (see grafana/dashtool.py)
 #   see readme.md
 
@@ -43,7 +43,7 @@ echo "Waiting for traefik..."
 until kubectl -n kube-system get deploy traefik >/dev/null 2>&1; do sleep 2; done
 kubectl -n kube-system rollout status deploy/traefik --timeout=180s
 
-for app in apps/*/; do mise run build "$(basename "$app")"; done
+for c in $(python3 profile.py buildable); do mise run build "$c"; done   # components/<c>/docker
 
 if python3 profile.py enabled keycloak; then mise run keycloak:apply; fi
 echo "cluster ready - profile $(python3 profile.py current): $(tr '\n' ' ' < runtime.profile/components)"
@@ -98,14 +98,15 @@ kubectl -n auth rollout restart deploy/oauth2-proxy >/dev/null 2>&1 && echo "  r
 """
 
 [tasks.build]
-description = "Build apps/<app>, push to the local registry, restart its deployment"
-usage = 'arg "<app>" help="directory under apps/"'
+description = "Build components/<component>/docker, push to the local registry, restart its deployment"
+usage = 'arg "<component>" help="component with a docker/ folder"'
 run = """#!/bin/bash
 set -euo pipefail
-app="$usage_app"
+app="$usage_component"
+[ -d "components/$app/docker" ] || { echo "ERROR: components/$app/docker/ not found" >&2; exit 1; }
 image="localhost:5005/$app:latest"       # pulled in-cluster as localdev-registry:5005/$app
 
-docker build -t "$image" "apps/$app"
+docker build -t "$image" "components/$app/docker"
 docker push "$image"
 
 # restart any deployment labelled app=<app> so it pulls the new :latest
@@ -334,6 +335,10 @@ done <<< "$removed"
 # so give re-added components' manifests a fresh mtime (content and git are unaffected)
 missing=$(python3 profile.py missing $(kubectl -n kube-system get addon -o jsonpath='{.items[*].metadata.name}'))
 if [ -n "$missing" ]; then touch $missing; fi
+# newly enabled components with a docker/ folder: build their image (until then they ImagePullBackOff)
+for c in $(python3 profile.py buildable); do
+    if grep -q "/components/$c/manifests/" <<< "$missing"; then mise run build "$c"; fi
+done
 mise run cluster:profile:sync
 if python3 profile.py enabled keycloak; then mise run cluster:secrets >/dev/null; mise run keycloak:apply; fi
 echo "profile $to active: $(tr '\n' ' ' < runtime.profile/components)"

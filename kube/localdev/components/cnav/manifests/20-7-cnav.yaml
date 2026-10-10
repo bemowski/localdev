@@ -1,5 +1,5 @@
 # Cluster navigator at / — cards linking to the apps, plus a live status column. Behind SSO.
-# Image: apps/cnav (Python), built and pushed by `mise run build cnav`.
+# Image: components/cnav/docker (Python), built and pushed by `mise run build cnav`.
 # Edit cards.yaml / status.yaml below; the page picks them up within ~a minute, no rebuild.
 apiVersion: v1
 kind: Namespace
@@ -104,6 +104,9 @@ data:
         - name: Registry UI
           checks:
             - {kind: Deployment, namespace: registry, name: registry-ui}
+        - name: cnav
+          checks:
+            - {kind: Deployment, namespace: cnav, name: cnav}
     - group: tools
       items:
         - name: Postgres
@@ -164,9 +167,6 @@ data:
         - name: whoami
           checks:
             - {kind: Deployment, namespace: demo, name: whoami}
-        - name: cnav
-          checks:
-            - {kind: Deployment, namespace: cnav, name: cnav}
 ---
 apiVersion: v1
 kind: ServiceAccount

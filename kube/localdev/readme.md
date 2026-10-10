@@ -35,7 +35,7 @@ Ephemeral local Kubernetes (k3d) with path-based routing on `http://localhost/<a
 
 ```bash
 # cluster lifecycle
-mise run cluster:create [profile]           # create cluster with a profile (lite|dev|knative|full), load secrets, build apps
+mise run cluster:create [profile]           # create cluster with a profile (lite|dev|knative|full), load secrets, build images
 mise run cluster:profile [profile]          # list profiles / switch the running cluster (adds/removes tools live)
 mise run cluster:status                     # profile, nodes, helm install jobs, ingresses
 mise run cluster:secrets                    # (re)load secrets.env into the cluster: Google client, admin login, Grafana admin
@@ -44,7 +44,7 @@ mise run cluster:recreate [profile]         # destroy + create
 mise run cluster:clean                      # delete runtime.data (asks first; cluster must be destroyed; keeps the profile)
 
 # apps and tools
-mise run build cnav                         # rebuild apps/cnav, push to the local registry, restart it
+mise run build cnav                         # rebuild components/cnav/docker, push to the local registry, restart it
 mise run pg:forward                         # postgres on localhost:5432 (pass a port to change it)
 mise run pg:psql                            # psql shell in the postgres pod
 mise run kn:forward                         # Knative internal gateway on localhost:8081 (call with a Host header)
@@ -75,14 +75,15 @@ Not everyone needs every tool. A **profile** (`profiles.toml`) chooses which opt
   - `mise run cluster:profile <profile>` switches a running cluster: new tools deploy within seconds, and dropped ones are uninstalled (HelmCharts, namespaces). Their data in `runtime.data/` is kept, so switching back restores it.
   - `mise run cluster:profile` lists the profiles.
 - **Dependencies:** `requires` in `profiles.toml` adds components automatically (keycloak needs postgres).
-- **A component is a folder:** `components/<name>/manifests/` (deployed by k3s) and `components/<name>/dashboards/` (shown in Grafana's *tools* folder).
+- **A component is a folder:** `components/<name>/manifests/` (deployed by k3s), plus optional `dashboards/` (shown in Grafana's *tools* folder) and `docker/` (your application code: an image built by `mise run build <name>`, see [Images](#images-componentsnamedocker)).
   - To add a tool, create that folder and add it to the profiles you want.
+  - Optional metadata in `profiles.toml` under `[components.<name>]`: `requires` (other components), `layer` (`platform`, `infra`, `tools` (default) or `apps`, deciding where its manifests deploy) and `always = true` (in every profile). cnav is `layer = "infra"`, `always = true`.
   - Manifest files must be `.yaml`, never `.json`, because k3s applies every JSON file it sees.
   - `mise run grafana:export <dashboard> component:<name>` saves a dashboard into a component.
 - **cnav** hides the cards and status rows tagged `tool: <component>` when that component isn't in the profile.
 
 **How it works:** `profile.py` builds **`runtime.profile/`** (gitignored, kept by `cluster:clean`), the view the cluster reads. It contains links only, so edits to the real files stay live:
-- `runtime.profile/manifests/` is mounted as k3s's manifests folder: a **directory link** per layer (`10-platform`, `20-infra`, `50-apps`), plus a real `30-tools/` folder holding a directory link per enabled component (`30-tools/postgres/30-2-postgres.yaml`).
+- `runtime.profile/manifests/` is mounted as k3s's manifests folder: a real folder per layer (`10-platform`, `20-infra`, `30-tools`, `50-apps`, deployed in that order) holding **directory links**: `core` for the layer's files in `manifests/<layer>/`, and one per enabled component in that layer (`20-infra/cnav/20-7-cnav.yaml`, `30-tools/postgres/30-2-postgres.yaml`).
 - `runtime.profile/dashboards/` is Grafana's provider path, with real folders of **file links**.
 
 k3s follows directory links, and Grafana follows file links (not directory links). The repo is mounted read-only inside the node at its own path, and at `/localdev`, so the links resolve in the cluster too.
@@ -91,8 +92,9 @@ k3s follows directory links, and Grafana follows file links (not directory links
 manifests/                       # always on
   10-platform/  10-1-traefik-config  10-2-oauth2-proxy (ns auth)
   20-infra/     20-1-headlamp (ns headlamp)  20-2-monitoring (ns monitoring)  20-3-logging  20-4-scrape  20-5-tracing  20-6-registry-ui (ns registry)
-  50-apps/      50-1-whoami (ns demo)  50-2-cnav (ns cnav)
-components/                      # optional, chosen by profile
+  50-apps/      50-1-whoami (ns demo)
+components/                      # chosen by profile (layer tools unless profiles.toml says otherwise)
+  cnav/      manifests/20-7-cnav (ns cnav)                docker/   (always on, layer infra)
   postgres/  manifests/30-2-postgres (ns pg)              dashboards/
   nats/      manifests/30-3-nats (ns nats)                dashboards/
   knative/   manifests/30-4-knative-operator 30-5-knative (ns knative-*)  dashboards/
@@ -307,17 +309,17 @@ Keycloak 26 runs in namespace `keycloak` (`components/keycloak/manifests/30-6-ke
 - **Metrics:** Keycloak is scraped via the `metrics: enabled` label. User-event metrics and HTTP latency histograms are on. Dashboards are in `tools/`.
 - **Resources:** about 0.5–0.7 GiB of memory, and roughly 30–60 seconds to start.
 
-## Apps (`apps/`)
+## Images (`components/<name>/docker/`)
 
-Each `apps/<name>/` directory holds a Dockerfile. `mise run build <name>` builds it as `localhost:5005/<name>:latest`, pushes it to the k3d registry and restarts any deployment labelled `app=<name>`. Inside the cluster, the image is pulled as `localdev-registry:5005/<name>:latest`. `mise run cluster:create` builds every app.
+A component's optional `docker/` folder holds application code and its Dockerfile. `mise run build <name>` builds it as `localhost:5005/<name>:latest`, pushes it to the k3d registry and restarts any deployment labelled `app=<name>`. Inside the cluster, the image is pulled as `localdev-registry:5005/<name>:latest`. `mise run cluster:create` builds every enabled component that has one, and `cluster:profile` builds those it adds.
 
-- **cnav** (`apps/cnav`, deployed by `manifests/50-apps/50-2-cnav.yaml`): a small Python server (stdlib plus PyYAML) serving the navigator page.
+- **cnav** (code in `components/cnav/docker/`, deployed by `components/cnav/manifests/20-7-cnav.yaml`): a small Python server (stdlib plus PyYAML) serving the navigator page.
   - **Cards (left):** from `cards.yaml`. Fields: `component`, `icon` (an emoji), `link`, an optional `description`, and optional `links`: a list of `{label, url}` shown as pill buttons on the card's bottom row, each opening in a new tab (e.g. a docs link).
   - **Status column (right):** from `status.yaml`. It's organised as groups, then items, then checks. Check kinds are `Deployment`, `StatefulSet` and `DaemonSet` (with `namespace` and `name`), and `HelmChart` (with `name`). An item's light is the worst of its checks, and a group's light is the worst of its items. Clicking a row opens the first workload in Headlamp. The column refreshes every 10 seconds.
     - **Green:** all replicas ready.
     - **Amber:** partially ready, a rollout in progress, starting up (under 2 minutes), restarted in the last 10 minutes, Helm still installing, or scaled to 0.
     - **Red:** no ready replicas, CrashLoopBackOff, an image pull error, a config error, stuck Pending (over 2 minutes), a failed Helm install, or the workload not found. The reason is shown under the row.
-  - **Editing:** both files live in the `cnav-config` ConfigMap. Edit them there and the page picks up the change within about a minute, with no rebuild. The copies in `apps/cnav/` are only defaults for running the image on its own, where the status column shows "unavailable".
+  - **Editing:** both files live in the `cnav-config` ConfigMap. Edit them there and the page picks up the change within about a minute, with no rebuild. The copies in `components/cnav/docker/` are only defaults for running the image on its own, where the status column shows "unavailable".
   - **Header:** shows who you're signed in as (from oauth2-proxy's `/oauth2/userinfo`) and a **Log out** button. Logging out ends the SSO session and lands on `/signed-out`, the only cnav page outside SSO. Your Google session stays signed in.
   - **Cards:** the ↗ icon on each card opens its link in a new tab.
   - **Memory:** working-set memory from metrics-server, summed per row, per group (in the group header) and for the cluster. Hover a row to see its own figure.
