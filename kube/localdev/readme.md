@@ -12,7 +12,7 @@ Ephemeral local Kubernetes (k3d) with path-based routing on `http://localhost/<a
 | `/grafana` | Grafana. You're signed in from the SSO email header, as an org Admin. |
 | `/prometheus` | Prometheus UI. Use `/prometheus/targets` for scrape health. |
 | `/alertmanager` | Alertmanager UI |
-| `/pgweb` | pgweb, a Postgres web UI. Each browser tab has its own connection: pick a database bookmark (`app`, `keycloak`) on the connect screen |
+| `/pgweb` | pgweb, a Postgres web UI. Each browser tab has its own connection: pick a database bookmark on the connect screen (one per database, automatic) |
 | `/nats` | NUI, a NATS web UI: live subscribe and publish on subjects, plus JetStream streams, consumers, KV and object stores |
 | `/keycloak/admin` | Keycloak admin console (an identity provider for apps), behind SSO. `/keycloak/realms/*` (login, token, discovery) is public |
 | `/docs` | localdev docs (MkDocs, built from `docs/`) |
@@ -178,8 +178,8 @@ Postgres 18 is a single-instance StatefulSet in namespace `pg` (`components/post
 - **From your desktop:** `postgresql://app:localdev@localhost:5432/app`, always on while postgres is installed (Service `pg/postgres-local`, bound to 127.0.0.1).
 - **Web UI:** `/pgweb/`. Each app has its **own database** on this server (e.g. `app`, `keycloak`), not a schema in `app`.
   - pgweb runs with `--sessions`, so **every browser tab or window has its own connection**. pgweb's default is a single connection shared by everyone.
-  - A new tab opens on the connect screen: choose a **Bookmark** (one per database), then click Connect. Within a tab, the database menu switches databases.
-  - When an app gets a new database, add a bookmark file to the `pgweb-bookmarks` ConfigMap in `30-2-postgres.yaml`.
+  - A new tab opens on the connect screen: choose a **Bookmark**, then click Connect. To switch databases within a tab, click the current database's name at the top of the left sidebar and pick another in the search box that opens.
+  - **Bookmarks are automatic:** the pgweb pod's `bookmarks` sidecar writes one per database on the server (superuser login from Secret `postgres-app`) every 30 seconds, and removes them for dropped databases. A component that creates its own database needs no registration.
 - **Later move to CloudNativePG:** the Service and Secret names match what CloudNativePG creates for a `Cluster` named `postgres`, so apps won't need changes. Data moves with `pg_dump` and `pg_restore`.
 
 ## NATS
