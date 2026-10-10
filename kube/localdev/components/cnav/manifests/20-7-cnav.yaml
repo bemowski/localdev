@@ -174,7 +174,7 @@ metadata:
   name: cnav
   namespace: cnav
 ---
-# read-only: just what /api/status looks at
+# read-only: just what /api/status and /api/ports look at
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
@@ -198,6 +198,12 @@ rules:
   - apiGroups: [""]                   # node allocatable memory (header tooltip)
     resources: [nodes]
     verbs: [get, list]
+  - apiGroups: [""]                   # /api/ports: which Service answers a host port
+    resources: [services]
+    verbs: [list]
+  - apiGroups: ["discovery.k8s.io"]   # ... and its ready endpoints
+    resources: [endpointslices]
+    verbs: [list]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
@@ -241,12 +247,17 @@ spec:
               mountPath: /etc/cnav   # whole dir (not subPath) so ConfigMap edits propagate
             - name: profile
               mountPath: /etc/localdev-profile
+            - name: k3d-config     # host port mappings, for /api/ports
+              mountPath: /etc/localdev/k3d.yaml
+              readOnly: true
       volumes:
         - name: config
           configMap:
             name: cnav-config
         - name: profile        # enabled components (cluster:create / cluster:profile); optional
           configMap: {name: localdev-profile, optional: true}
+        - name: k3d-config     # the repo is mounted in the node at /localdev (k3d.yaml volumes)
+          hostPath: {path: /localdev/k3d.yaml, type: File}
 ---
 apiVersion: v1
 kind: Service

@@ -1,8 +1,9 @@
 """cnav — cluster navigator.
 
-Serves the static page, the config files (cards.yaml, status.yaml) and
+Serves the static page, the config files (cards.yaml, status.yaml),
 /api/status, which evaluates status.yaml against the Kubernetes API using the
-pod's service account. Stdlib only, plus PyYAML.
+pod's service account, and /api/ports, the host ports k3d.yaml exposes and what
+answers them in the cluster. Stdlib only, plus PyYAML.
 """
 import json
 import os
@@ -37,6 +38,8 @@ def for_profile(items):
     if enabled is None:
         return items
     return [i for i in items if not isinstance(i, dict) or not i.get("tool") or i["tool"] in enabled]
+# the cluster's k3d config (host port mappings), mounted from the node's /localdev/k3d.yaml
+K3D_CONFIG = Path(os.environ.get("CNAV_K3D_CONFIG", "/etc/localdev/k3d.yaml"))
 PORT = int(os.environ.get("CNAV_LISTEN_PORT", "8080"))  # not CNAV_PORT: k8s injects that for Service "cnav"
 HEADLAMP = os.environ.get("CNAV_HEADLAMP", "/headlamp/c/main")
 
@@ -276,6 +279,81 @@ def status():
     }
 
 
+# --- ports ------------------------------------------------------------------
+
+def parse_k3d_port(spec):
+    """k3d port spec "[HOST:][HOSTPORT:]CONTAINERPORT[/PROTO][@FILTER]" -> (host ip, host port, node port, proto)."""
+    spec = spec.split("@", 1)[0]
+    spec, _, proto = spec.partition("/")
+    parts = spec.split(":")
+    host_port = parts[-2] if len(parts) >= 2 else None    # none = docker picks a random port
+    host_ip = parts[-3] if len(parts) >= 3 else None
+    return host_ip, host_port, int(parts[-1]), (proto or "tcp").upper()
+
+
+def endpoints_ready(kube, ns, svc):
+    """(ready, total) endpoints of a Service, from its EndpointSlices."""
+    slices = (kube.get(f"/apis/discovery.k8s.io/v1/namespaces/{ns}/endpointslices",
+                       labelSelector=f"kubernetes.io/service-name={svc}") or {}).get("items", [])
+    eps = [e for sl in slices for e in sl.get("endpoints") or []]
+    return sum(1 for e in eps if (e.get("conditions") or {}).get("ready")), len(eps)
+
+
+def node_listener(services, node_port, proto):
+    """The Service answering on a node port: a LoadBalancer port (k3s's klipper-lb binds it on the
+    node) or a NodePort. Returns (service, its port entry) or (None, None)."""
+    for s in services:
+        typ = s["spec"].get("type")
+        for sp in s["spec"].get("ports", []):
+            if sp.get("protocol", "TCP") != proto:
+                continue
+            if (typ == "LoadBalancer" and sp.get("port") == node_port) or \
+               (typ in ("LoadBalancer", "NodePort") and sp.get("nodePort") == node_port):
+                return s, sp
+    return None, None
+
+
+def registry_up(host_port):
+    try:   # the k3d registry container listens on :5000; k3d adds its name to CoreDNS
+        with urllib.request.urlopen("http://localdev-registry:5000/v2/", timeout=2):
+            return True
+    except Exception:
+        return False
+
+
+def ports():
+    """Host ports k3d exposes (k3d.yaml) and what answers each one inside the cluster."""
+    cfg = yaml.safe_load(K3D_CONFIG.read_text()) or {}
+    kube = Kube()
+    services = (kube.get("/api/v1/services") or {}).get("items", [])
+    out = []
+    for p in cfg.get("ports") or []:
+        host_ip, host_port, node_port, proto = parse_k3d_port(str(p.get("port", "")))
+        entry = {"host": f"{host_ip or 'localhost'}:{host_port or '(random)'}", "proto": proto,
+                 "node_port": node_port, "via": ",".join(p.get("nodeFilters") or [])}
+        svc, sp = node_listener(services, node_port, proto)
+        if svc is None:
+            entry.update(state="none", reason=f"nothing listens on node port {node_port} (not deployed?)")
+        else:
+            ns, name = svc["metadata"]["namespace"], svc["metadata"]["name"]
+            ready, total = endpoints_ready(kube, ns, name)
+            entry.update(namespace=ns, service=name, port_name=sp.get("name"), svc_port=sp.get("port"),
+                         target=str(sp.get("targetPort", sp.get("port"))), ready=ready, endpoints=total,
+                         state="green" if ready else "red",
+                         reason="" if ready else "no ready endpoints",
+                         link=f"{HEADLAMP}/services/{ns}/{name}")
+        out.append(entry)
+    reg = (cfg.get("registries") or {}).get("create") or {}
+    if reg.get("hostPort"):
+        up = registry_up(reg["hostPort"])
+        out.append({"host": f"localhost:{reg['hostPort']}", "proto": "TCP", "via": "docker",
+                    "service": reg.get("name", "registry"), "namespace": None, "target": "5000",
+                    "external": True, "state": "green" if up else "red",
+                    "reason": "" if up else "registry not reachable",
+                    "note": "image registry (docker container, outside the cluster)"})
+    return {"updated": datetime.now(timezone.utc).isoformat(timespec="seconds"), "ports": out}
+
+
 # --- http -------------------------------------------------------------------
 
 class Handler(SimpleHTTPRequestHandler):
@@ -305,6 +383,11 @@ class Handler(SimpleHTTPRequestHandler):
         if path == "/api/status":
             try:
                 return self.send_json(200, status())
+            except Exception as e:
+                return self.send_json(503, {"error": str(e)})
+        if path == "/api/ports":
+            try:
+                return self.send_json(200, ports())
             except Exception as e:
                 return self.send_json(503, {"error": str(e)})
         if path in ("/cards.yaml", "/status.yaml"):

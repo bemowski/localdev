@@ -325,7 +325,10 @@ A component's optional `docker/` folder holds application code and its Dockerfil
   - **Memory:** working-set memory from metrics-server, summed per row, per group (in the group header) and for the cluster. Hover a row to see its own figure.
     - The header shows **`pods`**, the sum for workloads listed in `status.yaml`, and **`node`**, the whole node(s), which is what Headlamp shows.
     - The node figure is roughly twice the pods figure because it also includes the `k3s server` process (API server, controllers, kubelet and the SQLite datastore, all outside any pod, about 1.5 GiB), containerd, kernel memory and active file cache.
-  - **Access:** the `cnav-status` ClusterRole gives read-only access to workloads, pods, jobs, HelmCharts and pod metrics.
+  - **Below the cards**, two panels (about a quarter of the screen high):
+    - **Ports (left)** lists the host ports k3d exposes and what answers each one in the cluster, e.g. `localhost:80 → kube-system / traefik :80 → web`, with ready endpoints and a link to the Service in Headlamp. It reads `k3d.yaml`, mounted read-only from the node, and matches each port to a LoadBalancer or NodePort Service, plus the image registry on `localhost:5005`. To expose a tool (e.g. Postgres on 5432), add the mapping to `k3d.yaml` (`mise run cluster:recreate`) and a LoadBalancer Service on that port. A mapped port with nothing behind it shows grey.
+    - **Events (right)** is a placeholder for now.
+  - **Access:** the `cnav-status` ClusterRole gives read-only access to workloads, pods, jobs, HelmCharts, pod metrics, Services and EndpointSlices.
 
 ## Google OAuth client (one-time setup)
 
