@@ -2,16 +2,20 @@
 
 Serves the static page, the config files (cards.yaml, status.yaml),
 /api/status, which evaluates status.yaml against the Kubernetes API using the
-pod's service account, and /api/ports, the host ports k3d.yaml exposes and what
-answers them in the cluster. Stdlib only, plus PyYAML.
+pod's service account, /api/ports, the host ports k3d.yaml exposes and what
+answers them in the cluster, and /api/events, cluster events from Loki (72h, shipped
+by Alloy) or, while Loki doesn't answer, from the Kubernetes API (last hour).
+Stdlib only, plus PyYAML.
 """
 import json
 import logging
 import os
+import re
 import signal
 import ssl
 import sys
 import threading
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -69,6 +73,7 @@ def for_profile(items):
 K3D_CONFIG = Path(os.environ.get("CNAV_K3D_CONFIG", "/etc/localdev/k3d.yaml"))
 PORT = int(os.environ.get("CNAV_LISTEN_PORT", "8080"))  # not CNAV_PORT: k8s injects that for Service "cnav"
 HEADLAMP = os.environ.get("CNAV_HEADLAMP", "/headlamp/c/main")
+LOKI = os.environ.get("CNAV_LOKI", "http://loki.monitoring.svc:3100")
 
 STARTING_GRACE_S = 120      # Pending/creating younger than this is amber, older is red
 RECENT_RESTART_S = 600      # a restart within this window is amber
@@ -441,6 +446,209 @@ def ports():
     return {"updated": datetime.now(timezone.utc).isoformat(timespec="seconds"), "ports": out}
 
 
+# --- events -----------------------------------------------------------------
+
+EVENTS_QUERY = '{job="loki.source.kubernetes_events"}'   # Alloy, 20-3-logging.yaml
+EVENTS_WINDOW_S = 72 * 3600     # Loki's retention
+EVENTS_MAX = 200
+
+# reason -> category (crash, image, unhealthy, deploy); other Warnings are "warning",
+# other Normals "routine" (hidden unless ?all=1). "Deployed" is for localdev's own events.
+REASONS = {
+    "BackOff": "crash", "CrashLoopBackOff": "crash", "OOMKilling": "crash", "Evicted": "crash",
+    "ErrImagePull": "image", "ImagePullBackOff": "image", "InspectFailed": "image",
+    "Unhealthy": "unhealthy", "FailedScheduling": "unhealthy", "NodeNotReady": "unhealthy",
+    "ProbeWarning": "unhealthy", "FailedMount": "unhealthy", "FailedAttachVolume": "unhealthy",
+    "ScalingReplicaSet": "deploy", "AppliedManifest": "deploy", "Deployed": "deploy",
+}
+SEVERITY = {"crash": "red", "image": "red", "unhealthy": "amber", "warning": "amber", "restart": "amber"}
+HEADLAMP_ROUTES = {"Pod": "pods", "Deployment": "deployments", "StatefulSet": "statefulsets",
+                   "DaemonSet": "daemonsets", "ReplicaSet": "replicasets", "Job": "jobs",
+                   "CronJob": "cronjobs", "Service": "services", "Node": "nodes"}
+
+# generated name suffixes use this alphabet (no vowels, no 0/1/3)
+_SFX = "[bcdfghjklmnpqrstvwxz2456789]"
+_POD_OF_RS = re.compile(rf"^(.+)-{_SFX}{{6,10}}-{_SFX}{{5}}$")   # deployment pod
+_POD_OF_STS = re.compile(r"^(.+)-\d+$")                          # statefulset pod
+_POD_OF_OTHER = re.compile(rf"^(.+)-{_SFX}{{5}}$")               # daemonset / job pod
+_RS = re.compile(rf"^(.+)-{_SFX}{{6,10}}$")
+
+
+def workload_name(kind, name):
+    """The component an object belongs to: pod/replicaset names minus their generated suffixes."""
+    if kind == "Pod":
+        for rx in (_POD_OF_RS, _POD_OF_STS, _POD_OF_OTHER):
+            m = rx.match(name)
+            if m:
+                return m.group(1)
+    elif kind == "ReplicaSet":
+        m = _RS.match(name)
+        if m:
+            return m.group(1)
+    return name
+
+
+def event_category(etype, reason, kind, message):
+    if reason in ("Failed", "BackOff") and "pull" in message.lower():   # "Back-off pulling image"
+        return "image"
+    if reason in REASONS:
+        return REASONS[reason]
+    if reason == "Killing":   # every rollout stops old containers; only a failed probe is news
+        return "restart" if "failed" in message.lower() else "routine"
+    if reason in ("SuccessfulCreate", "SuccessfulDelete") and kind in ("StatefulSet", "DaemonSet", "Job"):
+        return "deploy"
+    if etype == "Warning":
+        return "crash" if reason == "Failed" else "warning"
+    return "routine"
+
+
+def normalize_event(ts, etype, reason, kind, name, namespace, message, count):
+    category = event_category(etype or "", reason or "", kind or "", message or "")
+    route = HEADLAMP_ROUTES.get(kind)
+    link = None
+    if route and name:
+        link = f"{HEADLAMP}/{route}/{namespace}/{name}" if namespace else f"{HEADLAMP}/{route}/{name}"
+    return {"ts": ts, "type": category, "severity": SEVERITY.get(category, "normal"),
+            "event_type": etype, "reason": reason, "kind": kind, "name": name,
+            "namespace": namespace or None, "component": workload_name(kind, name or "") or kind,
+            "message": (message or "").strip(), "count": int(count or 1), "link": link}
+
+
+def iso(ns_epoch):
+    return datetime.fromtimestamp(int(ns_epoch) / 1e9, timezone.utc).isoformat(timespec="seconds")
+
+
+def collapse_into(rows, ev):
+    """One row per event: k8s updates an Event in place (count, last time) and Alloy logs each update."""
+    key = (ev["namespace"], ev["kind"], ev["name"], ev["reason"], ev["message"])
+    seen = rows.get(key)
+    if seen is None or (ev["ts"] or "") > (seen["ts"] or ""):
+        if seen:
+            ev["count"] = max(ev["count"], seen["count"])
+        rows[key] = ev
+    else:
+        seen["count"] = max(ev["count"], seen["count"])
+
+
+class LokiEvents:
+    """Collapsed events from Loki, kept in memory and updated incrementally: the first call backfills
+    the 72h window, each later call asks only for lines since the newest one seen (minus a small
+    overlap for lines that reach Loki late, deduplicated). A full resync every RESYNC_S self-heals."""
+
+    PAGE = 1000
+    OVERLAP_NS = 60 * 10**9
+    RESYNC_S = 900
+    BACKFILL_MAX = 50_000          # lines; well above what a dev cluster logs in 72h
+
+    def __init__(self):
+        self.lock = threading.Lock()
+        self.rows = {}
+        self.last_ns = 0           # newest line timestamp seen
+        self.recent = set()        # (ts_ns, line) inside the overlap window, to skip re-reads
+        self.synced = 0.0          # monotonic time of the last full backfill
+
+    def _query(self, **params):
+        q = urllib.parse.urlencode({"query": EVENTS_QUERY, "limit": self.PAGE, **params})
+        with urllib.request.urlopen(f"{LOKI}/loki/api/v1/query_range?{q}", timeout=4) as r:
+            streams = json.load(r)["data"]["result"]
+        return [(int(ts), line, st["stream"].get("namespace")) for st in streams for ts, line in st["values"]]
+
+    def _add(self, rows, ts, line, ns):
+        try:
+            e = json.loads(line)
+        except ValueError:
+            return
+        collapse_into(rows, normalize_event(iso(ts), e.get("type"), e.get("reason"), e.get("kind"),
+                                            e.get("name"), ns, e.get("msg"), e.get("count")))
+
+    def _backfill(self, now_ns):
+        """Page backwards through the window, newest first."""
+        rows, lines, end = {}, [], now_ns + 1
+        start = now_ns - EVENTS_WINDOW_S * 10**9
+        while len(lines) < self.BACKFILL_MAX:
+            page = self._query(start=start, end=end, direction="backward")
+            lines += page
+            if len(page) < self.PAGE:
+                break
+            end = min(ts for ts, _, _ in page)   # end is exclusive; lines at exactly this ns are re-read
+        for ts, line, ns in lines:
+            self._add(rows, ts, line, ns)
+        self.rows = rows
+        self.last_ns = max((ts for ts, _, _ in lines), default=0)
+        self.recent = {(ts, line) for ts, line, _ in lines if ts >= self.last_ns - self.OVERLAP_NS}
+        self.synced = time.monotonic()
+        log.debug("events: backfilled %d lines into %d rows", len(lines), len(rows))
+
+    def _update(self, now_ns):
+        """Lines since the newest seen (forward), page by page."""
+        start, added = self.last_ns - self.OVERLAP_NS, 0
+        while True:
+            page = self._query(start=start, end=now_ns + 1, direction="forward")
+            for ts, line, ns in page:
+                if (ts, line) in self.recent:
+                    continue
+                self.recent.add((ts, line))
+                added += 1
+                self._add(self.rows, ts, line, ns)
+                self.last_ns = max(self.last_ns, ts)
+            if len(page) < self.PAGE:
+                break
+            start = max(ts for ts, _, _ in page)
+        floor = self.last_ns - self.OVERLAP_NS
+        self.recent = {k for k in self.recent if k[0] >= floor}
+        if added:
+            log.debug("events: %d new lines", added)
+
+    def rows_now(self):
+        """Current collapsed rows (raises when Loki doesn't answer)."""
+        with self.lock:
+            now_ns = time.time_ns()
+            if not self.last_ns or time.monotonic() - self.synced > self.RESYNC_S:
+                self._backfill(now_ns)
+            else:
+                self._update(now_ns)
+            cutoff = iso(now_ns - EVENTS_WINDOW_S * 10**9)
+            self.rows = {k: ev for k, ev in self.rows.items() if (ev["ts"] or "") >= cutoff}
+            return [dict(ev) for ev in self.rows.values()]   # copies: later updates mutate rows
+
+
+loki_events = LokiEvents()
+
+
+def events_from_kube():
+    """Events still held by the API server (it drops them after an hour)."""
+    out = []
+    for e in (Kube().get("/api/v1/events") or {}).get("items", []):
+        obj = e.get("involvedObject") or {}
+        ts = (e.get("lastTimestamp") or (e.get("series") or {}).get("lastObservedTime")
+              or e.get("eventTime") or e["metadata"].get("creationTimestamp"))
+        if ts:
+            ts = datetime.fromisoformat(ts.replace("Z", "+00:00")).astimezone(timezone.utc).isoformat(timespec="seconds")
+        out.append(normalize_event(ts, e.get("type"), e.get("reason"), obj.get("kind"), obj.get("name"),
+                                   obj.get("namespace"), e.get("message"), e.get("count")))
+    return out
+
+
+def events(include_routine=False):
+    source = "loki"
+    try:
+        rows = loki_events.rows_now()
+    except Exception as e:
+        log.info("events: loki not answering (%s), using the kubernetes api", e)
+        rows = []
+    if not rows:
+        source, rows = "kubernetes", {}
+        for ev in events_from_kube():
+            collapse_into(rows, ev)
+        rows = list(rows.values())
+    out = sorted(rows, key=lambda ev: ev["ts"] or "", reverse=True)
+    hidden = sum(1 for ev in out if ev["type"] == "routine")
+    if not include_routine:
+        out = [ev for ev in out if ev["type"] != "routine"]
+    return {"updated": datetime.now(timezone.utc).isoformat(timespec="seconds"), "source": source,
+            "window": "72h" if source == "loki" else "1h", "routine": hidden, "events": out[:EVENTS_MAX]}
+
+
 # --- http -------------------------------------------------------------------
 
 class Handler(SimpleHTTPRequestHandler):
@@ -479,6 +687,13 @@ class Handler(SimpleHTTPRequestHandler):
             except Exception as e:
                 log.exception("/api/ports failed")
                 return self.send_json(503, {"error": str(e)})
+        if path == "/api/events":
+            try:
+                query = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
+                return self.send_json(200, events(include_routine=query.get("all", ["0"])[0] == "1"))
+            except Exception as e:
+                log.exception("/api/events failed")
+                return self.send_json(503, {"error": str(e)})
         if path in ("/cards.yaml", "/status.yaml"):
             f = CONFIG_DIR / path.lstrip("/")
             data = f.read_bytes()
@@ -504,7 +719,7 @@ class Handler(SimpleHTTPRequestHandler):
         return super().do_GET()
 
     # access log: errors loud, the page's own 10-second polling and probes only at debug
-    QUIET = ("/healthz", "/api/status", "/api/ports")
+    QUIET = ("/healthz", "/api/status", "/api/ports", "/api/events")
 
     def log_request(self, code="-", size="-"):
         try:

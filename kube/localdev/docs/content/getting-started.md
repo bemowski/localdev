@@ -135,7 +135,9 @@ Dropped tools are uninstalled; their data in `runtime.data/` is kept, so switchi
 | `nats://localhost:4222` | NATS (when installed) |
 | `localhost:5005` | image registry: `docker push localhost:5005/<name>` |
 
-The **Ports** card in the navigator shows these live.
+The **Ports** card in the navigator shows these live. Next to it, **Events** lists what happened in the
+cluster over the last 72 hours (deploys, crashes, failing probes, image pull errors). Tick **all** to also
+see the routine pod lifecycle.
 
 Coming from docker compose? See [Moving from Docker Compose](from-docker-compose.md).
 

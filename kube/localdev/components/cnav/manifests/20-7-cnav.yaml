@@ -190,7 +190,7 @@ metadata:
   name: cnav
   namespace: cnav
 ---
-# read-only: just what /api/status and /api/ports look at
+# read-only: just what /api/status, /api/ports and /api/events look at
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
@@ -219,6 +219,9 @@ rules:
     verbs: [list]
   - apiGroups: ["discovery.k8s.io"]   # ... and its ready endpoints
     resources: [endpointslices]
+    verbs: [list]
+  - apiGroups: [""]                   # /api/events fallback while Loki isn't answering
+    resources: [events]
     verbs: [list]
 ---
 apiVersion: rbac.authorization.k8s.io/v1

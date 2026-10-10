@@ -16,5 +16,5 @@ Kubernetes that runs their apps the way production does. All it needs is mise an
 - **[Secrets](secrets.md)**: External Secrets with a local store, the same manifests as production.
 
 !!! tip "Where things are"
-    Start at [http://localhost/](http://localhost/), the cluster navigator: a card for every app and a live
-    status column. These docs are built from `kube/localdev/docs/content/*.md`.
+    Start at [http://localhost/](http://localhost/), the cluster navigator: a card for every app, a live
+    status column, the exposed ports and recent cluster events. These docs are built from `kube/localdev/docs/content/*.md`.

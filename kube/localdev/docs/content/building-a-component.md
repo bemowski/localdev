@@ -198,6 +198,12 @@ row per component, with all its labelled workloads as checks, in the `apps` grou
 and goes with the workloads. (`status.yaml` in cnav's ConfigMap still lists the built-in tools; a
 component named by a `tool:` there isn't shown twice.)
 
+### In cnav's events
+
+cnav's **Events** card shows your component's Kubernetes events (crashes, failing probes, image pulls,
+rollouts) for 72 hours. A script can add its own, for example after a deploy, by creating a plain
+Kubernetes Event on the Deployment with `reason: Deployed`; it shows as type `deploy`.
+
 ## Secrets
 
 Don't put secret values in the manifest: declare an **ExternalSecret** against the `localdev` store

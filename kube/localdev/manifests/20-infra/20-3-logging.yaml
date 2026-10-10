@@ -133,6 +133,13 @@ spec:
             forward_to = [loki.write.default.receiver]
           }
 
+          // Cluster events (the API server drops them after 1h) -> Loki, kept 72h. Read by cnav's
+          // Events card: {job="loki.source.kubernetes_events"}, one JSON line per event update.
+          loki.source.kubernetes_events "cluster" {
+            log_format = "json"
+            forward_to = [loki.write.default.receiver]
+          }
+
           loki.write "default" {
             endpoint {
               url = "http://loki.monitoring.svc:3100/loki/api/v1/push"
