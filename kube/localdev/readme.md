@@ -68,6 +68,8 @@ mise run grafana:check                      # JSON valid + uids unique (a duplic
 
 See the docs: [Getting started](docs/content/getting-started.md) (profiles), [Cluster layout](docs/content/cluster-layout.md) (layers, `runtime.profile/`, manifest rules) and [Components](docs/content/components.md) (component folders, `profiles.toml` metadata, adding one).
 
+**What the cluster knows about its profile and host.** `cluster:create` and `cluster:profile` publish two ConfigMaps for pods to read: `cnav/localdev-profile` (profile name, enabled components) and `kube-system/localdev-host` (username, `cluster_type` = localdev, `cluster_role`, host `os` / `os_variant` / `os_version`, k3d version, from `hostfacts.py`). The role defaults to `dev`; set it in your `local.toml` with `[cluster]` / `role = "perftest"` (one of dev, test, stage, prod, perftest), then `mise run cluster:profile`.
+
 **Signing in.** Every app goes through oauth2-proxy (each namespace has an `sso` forwardAuth Middleware). Its sign-in page offers two ways in:
 - **Sign in with Google.** Only accounts on the **allow-list** get in, and it applies to every app. The list is `[sso-access]` in `secrets.store.toml`: `emails` for exact addresses and `domains` for whole domains (`"example.com"`, or `".example.com"` for any subdomain). Edit it, then `mise run secrets:sync`. See [Secrets](docs/content/secrets.md#who-can-sign-in). Google accounts must also be test users on the consent screen (below), unless the app is published.
 - **Username and password:** user `admin`, password `[localdev-admin] password` from `secrets.store.toml`. This works offline, since nothing goes to Google. Local sessions have no email, so the allow-list doesn't apply to them.

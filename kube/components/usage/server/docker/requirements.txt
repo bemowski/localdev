@@ -1,0 +1,8 @@
+fastapi==0.141.1
+uvicorn==0.54.0
+psycopg[binary]==3.3.6
+psycopg-pool==3.3.3
+jsonschema==4.26.0
+rfc3339-validator==0.1.4
+pyyaml==6.0.3
+prometheus-client==0.26.0
