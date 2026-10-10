@@ -7,8 +7,8 @@
 # session cookie.)
 # Two ways to sign in, on one page:
 #   - Google, for accounts in the allow-list below (authenticatedEmailsFile)
-#   - local user "admin" (htpasswd), password LOCAL_ADMIN_PASSWORD from secrets.env
-# Secrets auth/oauth2-proxy and auth/oauth2-proxy-htpasswd come from `mise run cluster:secrets`.
+#   - local user "admin" (htpasswd), password from the secret store (localdev-admin)
+# Secrets auth/oauth2-proxy and auth/oauth2-proxy-htpasswd are ExternalSecrets: 10-3-sso-secrets.yaml.
 # Local (htpasswd) sessions have no email: the allow-list doesn't apply to them, and apps
 # keyed on the email header (Grafana) show their own login instead.
 apiVersion: v1
@@ -28,6 +28,7 @@ spec:
   targetNamespace: auth
   createNamespace: true
   valuesContent: |-
+    deploymentAnnotations: {reloader.stakater.com/auto: "true"}   # roll when its secrets change
     config:
       existingSecret: oauth2-proxy
       emailDomains: []             # no domain-wide access: only the allow-list below

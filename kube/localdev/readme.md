@@ -32,7 +32,7 @@ Ephemeral local Kubernetes (k3d) with path-based routing on `http://localhost/<a
   ```
   Docker Desktop and OrbStack on macOS and WSL2 run their own VM kernels, and usually already allow more.
 - **mise.** Run `mise install` in this directory to get k3d, kubectl, kn and Python.
-- **`secrets.env` or `secrets.env.asc`**, from the Google OAuth setup below.
+- **`secrets.store.toml` or `secrets.store.toml.asc`**: your secrets (Google OAuth client, cookie secret, admin password), from the Google OAuth setup below. All secrets are mastered in the secret store and synced by External Secrets: see the docs ([Secrets](docs/content/secrets.md)). Have an old `secrets.env`? `mise run secrets:migrate` converts it.
 
 ## Usage
 
@@ -41,7 +41,8 @@ Ephemeral local Kubernetes (k3d) with path-based routing on `http://localhost/<a
 mise run cluster:create [profile]           # create cluster with a profile (lite|dev|knative|full), load secrets, build images
 mise run cluster:profile [profile]          # list profiles / switch the running cluster (adds/removes tools live)
 mise run cluster:status                     # profile, nodes, helm install jobs, ingresses
-mise run cluster:secrets                    # (re)load secrets.env into the cluster: Google client, admin login, Grafana admin
+mise run secrets:sync                       # (re)load secrets.store.toml into the secret store (cluster:secrets does the same)
+mise run secrets:list                       # store entries/keys (no values) and ExternalSecret status
 mise run cluster:destroy                    # delete cluster + .kubeconfig (runtime.data is kept)
 mise run cluster:recreate [profile]         # destroy + create
 mise run cluster:clean                      # delete runtime.data (asks first; cluster must be destroyed; keeps the profile)
@@ -67,9 +68,9 @@ See the docs: [Getting started](docs/content/getting-started.md) (profiles), [Cl
 
 **Signing in.** Every app goes through oauth2-proxy (each namespace has an `sso` forwardAuth Middleware). Its sign-in page offers two ways in:
 - **Sign in with Google.** Only accounts on the **allow-list** in `manifests/10-platform/10-2-oauth2-proxy.yaml` (`authenticatedEmailsFile.restricted_access`, one per line) get in, and the list applies to every app. Google accounts must also be test users on the consent screen (below).
-- **Username and password:** user `admin`, password `LOCAL_ADMIN_PASSWORD` from `secrets.env`. This works offline, since nothing goes to Google. Local sessions have no email, so the allow-list doesn't apply to them.
+- **Username and password:** user `admin`, password `[localdev-admin] password` from `secrets.store.toml`. This works offline, since nothing goes to Google. Local sessions have no email, so the allow-list doesn't apply to them.
   - Apps that sign you in from the email header (Grafana) show their own login form for `admin` instead. Grafana's built-in admin is set to the same `admin` and password.
-  - To change the password: edit `secrets.env`, run `mise run encrypt secrets.env`, then `mise run cluster:secrets`.
+  - To change the password: edit `secrets.store.toml`, run `mise run secrets:sync` (Reloader rolls oauth2-proxy and Grafana), and `mise run encrypt secrets.store.toml` to update the shared copy.
 - To limit a single app to certain Google accounts, add `?allowed_emails=a@x.com` to that app's middleware address. That also shuts `admin` out of that app, because local sessions have no email.
 
 ## Grafana dashboards (`grafana/`)
@@ -226,7 +227,7 @@ Keycloak 26 runs in namespace `keycloak` (`components/keycloak/manifests/30-6-ke
 
 | what | URL |
 |---|---|
-| admin console (behind SSO, then `admin` / `LOCAL_ADMIN_PASSWORD`) | http://localhost/keycloak/admin/ |
+| admin console (behind SSO, then `admin` / the `localdev-admin` password) | http://localhost/keycloak/admin/ |
 | issuer (put this in your app's config) | `http://localhost/keycloak/realms/localdev` |
 | discovery | `http://localhost/keycloak/realms/localdev/.well-known/openid-configuration` |
 | from pods (token, JWKS, discovery) | `http://keycloak.keycloak.svc:8080/keycloak/realms/localdev/...` |
@@ -308,17 +309,20 @@ oauth2-proxy needs a Google OAuth client ID and secret, plus a cookie secret.
    openssl rand -base64 32 | tr -- '+/' '-_'
    ```
 
-6. **Write `secrets.env`** in this directory. It's gitignored, so it never gets committed:
-   ```bash
-   GOOGLE_CLIENT_ID=xxxxxxxx.apps.googleusercontent.com
-   GOOGLE_CLIENT_SECRET=GOCSPX-xxxxxxxx
-   COOKIE_SECRET=xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx=
-   LOCAL_ADMIN_PASSWORD=choose-one     # local "admin" login (sign-in page form, Grafana)
+6. **Write `secrets.store.toml`** in this directory. It's gitignored, so it never gets committed:
+   ```toml
+   [sso]
+   google-client-id = "xxxxxxxx.apps.googleusercontent.com"
+   google-client-secret = "GOCSPX-xxxxxxxx"
+   cookie-secret = "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx="
+
+   [localdev-admin]
+   password = "choose-one"     # local "admin" login (sign-in page form, Grafana, Keycloak)
    ```
 
 7. **Encrypt it and commit only the `.asc`:**
    ```bash
-   mise run encrypt secrets.env    # -> secrets.env.asc
-   git add secrets.env.asc
+   mise run encrypt secrets.store.toml    # -> secrets.store.toml.asc
+   git add secrets.store.toml.asc
    ```
-   `mise run cluster:create` (via `mise run cluster:secrets`) decrypts `secrets.env.asc` automatically when `secrets.env` is missing or older than it, and checks all four keys are set. Save `secrets.env` before encrypting: the encrypt task reads the file on disk. The passphrase is `$PASSPHRASE_FILE`, which defaults to `~/.ssh/id_ed25519`.
+   `mise run cluster:create` decrypts `secrets.store.toml.asc` automatically when `secrets.store.toml` is missing or older than it, and checks every required value (`""` in `secrets.defaults.toml`) is set. Save the file before encrypting: the encrypt task reads the file on disk. The passphrase is `$PASSPHRASE_FILE`, which defaults to `~/.ssh/id_ed25519`.

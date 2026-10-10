@@ -5,8 +5,9 @@
 - **Docker**, and about 4 GB of RAM free for it.
 - **[mise](https://mise.jdx.dev)**: run `mise install` in `kube/localdev` to get k3d, kubectl, kn and Python.
 - **Free host ports:** 80 (ingress), 5005 (image registry), and 5432 / 4222 (Postgres / NATS, on 127.0.0.1).
-- **`secrets.env`** (or the encrypted `secrets.env.asc`): the Google OAuth client and the local admin
-  password. See the readme for the one-time Google setup.
+- **`secrets.store.toml`** (or the encrypted `secrets.store.toml.asc`): the Google OAuth client, the
+  cookie secret and the local admin password. See [Secrets](secrets.md), and the readme for the
+  one-time Google setup.
 - **Linux:** raise the inotify limits once (see the readme), or pods' logs fail with "too many open files".
 
 ## Create a cluster
@@ -20,7 +21,7 @@ This creates the k3d cluster, loads the secrets, deploys everything and builds t
 (cnav, docs). The first run takes a few minutes while images download.
 
 Then open [http://localhost/](http://localhost/) and sign in, either with Google (accounts on the
-allow-list) or as `admin` with the password from `secrets.env`.
+allow-list) or as `admin` with the `localdev-admin` password from `secrets.store.toml`.
 
 ## Profiles
 
@@ -58,7 +59,7 @@ Coming from docker compose? See [Moving from Docker Compose](from-docker-compose
 ```bash
 mise run cluster:status            # profile, nodes, helm jobs, ingresses
 mise run build <component>         # rebuild a component's image (cnav, docs) and restart it
-mise run cluster:secrets           # reload secrets.env into the cluster
+mise run secrets:sync              # reload secrets.store.toml into the secret store
 mise run cluster:recreate          # destroy + create (runtime.data is kept)
 mise run cluster:destroy           # delete the cluster
 mise run cluster:clean             # delete runtime.data (cluster must be destroyed)

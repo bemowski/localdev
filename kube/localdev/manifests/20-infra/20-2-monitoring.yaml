@@ -34,7 +34,8 @@ spec:
     grafana:
       fullnameOverride: grafana
       admin:
-        existingSecret: grafana-admin     # from `mise run cluster:secrets` (admin / LOCAL_ADMIN_PASSWORD)
+        existingSecret: grafana-admin     # ExternalSecret 20-9-grafana-secrets.yaml (localdev-admin)
+      annotations: {reloader.stakater.com/auto: "true"}   # roll when grafana-admin changes
       defaultDashboardsEnabled: false   # copies live in grafana/dashboards/{platform,infra}
       # Dashboards come from the active profile's view, runtime.profile/dashboards/ (links into
       # grafana/dashboards/ and components/*/dashboards/, see profile.py), read through the repo
@@ -71,7 +72,7 @@ spec:
           serve_from_sub_path: true
         auth:
           # Google sessions arrive with X-Auth-Request-Email (auth.proxy, no form). Local "admin"
-          # SSO sessions have no email, so Grafana shows its form: admin / LOCAL_ADMIN_PASSWORD.
+          # SSO sessions have no email, so Grafana shows its form: admin / the localdev-admin password (secret store).
           disable_login_form: false
           disable_signout_menu: true
         auth.proxy:

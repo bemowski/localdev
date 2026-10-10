@@ -1,164 +1,139 @@
 # Secrets
 
-localdev runs the **[External Secrets Operator](https://external-secrets.io)** (ESO), as in most
-production clusters: apps never hold secret values in their manifests. They declare an
-**ExternalSecret** ("I need key X from store Y, as Secret Z"), and ESO fetches the value from a
-**secret store** (GCP Secret Manager, AWS Secrets Manager, Vault, ...) and keeps a Kubernetes Secret
-in sync with it.
+Every secret localdev uses is **mastered in one secret store** and **synced to where it is needed by
+the [External Secrets Operator](https://external-secrets.io)** (ESO), as in most production
+clusters. Nothing writes Secrets into namespaces by hand, and no manifest holds a secret value.
 
-Locally there is no cloud connection by default. Instead, a **local store** answers the same
-ExternalSecrets, so apps use the same manifests here as in production.
+- The store is a `ClusterSecretStore` named **`localdev`**. Every consumer references that name.
+- Each consumer owns an **ExternalSecret** ("I need key X of entry Y, as Secret Z") next to its own
+  manifests; ESO creates and updates the Secret.
+- **[Reloader](https://github.com/stakater/Reloader)** rolls the pods that use a Secret when it changes
+  (workloads opt in with the annotation `reloader.stakater.com/auto: "true"`).
 
-## The local store
+Today the store is **local**: no cloud account needed. Moving it to a cloud secret manager later
+(most likely Google Secret Manager) changes the store's definition, and nothing else.
 
-| piece | what |
-|---|---|
-| `ClusterSecretStore` **`local`** | the store apps reference; ESO's Kubernetes provider |
-| namespace **`secret-store`** | where the values live: one Secret per entry |
-| **`secrets.store.toml`** | your values, in `kube/localdev`, gitignored |
-| `mise run secrets:sync` | loads the file into `secret-store` and refreshes ExternalSecrets |
+## What's in the store
+
+| entry | keys | consumers (ExternalSecret → Secret) |
+|---|---|---|
+| `sso` | `google-client-id`, `google-client-secret`, `cookie-secret` | `auth/oauth2-proxy` |
+| `localdev-admin` | `username`, `password` | `auth/oauth2-proxy-htpasswd` (bcrypt line, built by ESO), `monitoring/grafana-admin`, `keycloak/keycloak-admin` |
+| `postgres-app` | `username`, `password`, `dbname` | `pg/postgres-app` (+ `host`, `port`, `uri`, `jdbc-uri`), `keycloak/keycloak-db` |
+| `keycloak-db` | `username`, `password` | `keycloak/keycloak-db` |
+| *your entries* | | your components' ExternalSecrets |
+
+## Where the values come from
+
+The store's values are merged from these files, later ones winning:
+
+| file | committed? | holds |
+|---|---|---|
+| `secrets.defaults.toml` | yes | the platform entries: their keys, fixed values (`username = "admin"`), and `""` for **required** values |
+| `components/<c>/secrets.defaults.toml` | yes | a component's fixed dev values (Postgres `app` / `localdev`) |
+| **`secrets.store.toml`** | **no** (gitignored) | your real secrets and any overrides |
 
 ```toml
-# kube/localdev/secrets.store.toml: one table per secret
-[myapp-db]                    # remoteRef.key
-username = "app"              # remoteRef.property = "username"
-password = "localdev"
+# kube/localdev/secrets.store.toml
+[sso]
+google-client-id = "1234-abc.apps.googleusercontent.com"
+google-client-secret = "GOCSPX-..."
+cookie-secret = "..."            # openssl rand -base64 32 | tr -- '+/' '-_'
 
-[myapp-api]
+[localdev-admin]
+password = "..."
+
+[myapp-api]                      # your own entry
 stripe-key = "sk_test_..."
 ```
 
 ```bash
-mise run secrets:sync     # file -> store; entries removed from the file are removed from the store
-mise run secrets:list     # store names and keys (no values), stores, ExternalSecrets and their status
+mise run secrets:sync      # merge the files into the store; ESO and Reloader take it from there
+mise run secrets:list      # entries and keys (no values), where each comes from, ExternalSecret status
 ```
 
-`cluster:create` and `cluster:secrets` run the sync too. To share values with a team without
-committing them in plain text, encrypt the file (`mise run encrypt secrets.store.toml`) and commit
-`secrets.store.toml.asc`; `secrets:sync` decrypts it when it is newer than your copy.
+- `cluster:create` checks that every required value is set before it starts, and syncs after.
+- Entries removed from the files are removed from the store.
+- To share values with a team without committing them in plain text, encrypt the file
+  (`mise run encrypt secrets.store.toml`) and commit `secrets.store.toml.asc`; it is decrypted
+  automatically when it is newer than your copy.
+- **Coming from `secrets.env`?** `mise run secrets:migrate` writes `secrets.store.toml` from it once
+  (it never overwrites or deletes anything). Then encrypt the new file, and delete `secrets.env` and
+  `secrets.env.asc` when you're happy.
 
 ## Using a secret in a component
+
+Add an entry to `secrets.store.toml` (or, for fixed dev values, a `secrets.defaults.toml` in your
+component), then an ExternalSecret next to your manifests:
 
 ```yaml
 apiVersion: external-secrets.io/v1
 kind: ExternalSecret
 metadata:
-  name: myapp-db
+  name: myapp-api
   namespace: myapp
 spec:
   refreshInterval: 1h
-  secretStoreRef: {kind: ClusterSecretStore, name: local}
-  target: {name: myapp-db}           # the Secret ESO creates in this namespace
+  secretStoreRef: {kind: ClusterSecretStore, name: localdev}
+  target: {name: myapp-api}            # the Secret ESO creates in this namespace
   data:
-    - secretKey: DB_USER
-      remoteRef: {key: myapp-db, property: username}
-    - secretKey: DB_PASSWORD
-      remoteRef: {key: myapp-db, property: password}
+    - secretKey: STRIPE_KEY
+      remoteRef: {key: myapp-api, property: stripe-key}
 ```
 
-and in the Deployment's container:
+and in the Deployment:
 
 ```yaml
+metadata:
+  annotations: {reloader.stakater.com/auto: "true"}   # roll when the Secret changes
+spec:
+  template:
+    spec:
+      containers:
+        - name: myapp
           envFrom:
-            - secretRef: {name: myapp-db}
+            - secretRef: {name: myapp-api}
 ```
 
-`secrets:sync` asks ESO to re-read at once, so a changed value lands in the Secret within seconds.
-Pods read environment variables at start: restart them (`mise run build <name>`, or
-`kubectl rollout restart`) to pick up a new value, or mount the Secret as a file instead.
+ESO can also build values with a template, e.g. a connection string from several keys
+(see `components/postgres/manifests/30-1-postgres-secrets.yaml`).
 
-## Same manifests as production
+!!! tip "Keep ExternalSecrets in their own file"
+    k3s applies a manifest file as a whole and retries it until every object in it is accepted. On a
+    fresh cluster, ExternalSecrets wait for ESO to install, so put them in a separate file from your
+    workloads (`30-1-postgres-secrets.yaml` next to `30-2-postgres.yaml`).
 
-ExternalSecrets name their store. If production uses, say, a `ClusterSecretStore` called
-`gcp-secrets`, give localdev a store with **that name** and the local spec, and your component's
-ExternalSecrets don't change at all between environments. Add it to your component's manifests
-(or your own `local.toml` component):
+## Moving to a cloud store
+
+Because every consumer asks for `ClusterSecretStore localdev`, moving to Google Secret Manager is a
+change to that one object (`components/external-secrets/manifests/20-8-external-secrets.yaml`):
 
 ```yaml
 apiVersion: external-secrets.io/v1
 kind: ClusterSecretStore
 metadata:
-  name: gcp-secrets          # production's store name, answered locally
+  name: localdev
 spec:
   provider:
-    kubernetes:
-      remoteNamespace: secret-store
-      server:
-        caProvider: {type: ConfigMap, name: kube-root-ca.crt, key: ca.crt, namespace: secret-store}
+    gcpsm:
+      projectID: my-dev-project
       auth:
-        serviceAccount: {name: store-reader, namespace: secret-store}
+        secretRef:
+          secretAccessKeySecretRef: {name: gcp-sm, key: key.json, namespace: external-secrets}
 ```
 
-Keys must then match production's secret names (`remoteRef.key`) in `secrets.store.toml`.
+with each entry stored as a Google secret of the same name, holding a JSON object with the same keys
+(`sso` = `{"google-client-id": "...", ...}`). The ExternalSecrets' `key` / `property` references then
+work unchanged. The credentials Secret (`gcp-sm`) is the one thing still created locally:
 
-## Using a real cloud store
+```bash
+kubectl -n external-secrets create secret generic gcp-sm --from-file=key.json=<service-account-key.json>
+```
 
-When you do want the real thing locally (shared dev secrets, a test project), add a store for the
-provider next to `local`. Credentials go into a Secret from your gitignored config, never into git.
-Sketches (see the ESO provider docs for all options):
+AWS Secrets Manager and Vault work the same way (provider `aws` with access keys, or `vault` with a
+token); see the ESO provider docs. Making the store's backing a configurable choice (local or Google)
+is the next step on the roadmap.
 
-=== "GCP Secret Manager"
-
-    ```bash
-    kubectl -n external-secrets create secret generic gcp-sm --from-file=key.json=<service-account-key.json>
-    ```
-    ```yaml
-    apiVersion: external-secrets.io/v1
-    kind: ClusterSecretStore
-    metadata: {name: gcp-secrets}
-    spec:
-      provider:
-        gcpsm:
-          projectID: my-dev-project
-          auth:
-            secretRef:
-              secretAccessKeySecretRef: {name: gcp-sm, key: key.json, namespace: external-secrets}
-    ```
-
-=== "AWS Secrets Manager"
-
-    ```bash
-    kubectl -n external-secrets create secret generic aws-sm \
-        --from-literal=access-key=... --from-literal=secret-key=... # [--from-literal=session-token=...]
-    ```
-    ```yaml
-    apiVersion: external-secrets.io/v1
-    kind: ClusterSecretStore
-    metadata: {name: aws-secrets}
-    spec:
-      provider:
-        aws:
-          service: SecretsManager
-          region: us-east-1
-          auth:
-            secretRef:
-              accessKeyIDSecretRef: {name: aws-sm, key: access-key, namespace: external-secrets}
-              secretAccessKeySecretRef: {name: aws-sm, key: secret-key, namespace: external-secrets}
-    ```
-
-=== "Vault"
-
-    ```bash
-    kubectl -n external-secrets create secret generic vault-token --from-literal=token=...
-    ```
-    ```yaml
-    apiVersion: external-secrets.io/v1
-    kind: ClusterSecretStore
-    metadata: {name: vault}
-    spec:
-      provider:
-        vault:
-          server: https://vault.example.com
-          path: secret
-          version: v2
-          auth:
-            tokenSecretRef: {name: vault-token, key: token, namespace: external-secrets}
-    ```
-
-Wiring one of these in as a configurable option is on the roadmap.
-
-## What stays outside ESO
-
-localdev's own bootstrap secrets (the Google sign-in client, the local admin password) come from
-`secrets.env` and are loaded by `mise run cluster:secrets`: they are needed before anything else
-runs, so they don't depend on ESO.
+!!! note "Postgres passwords"
+    Postgres uses `postgres-app.password` only when it first initializes its data
+    (`runtime.data/postgres`). Changing it later updates the Secret, not the database.

@@ -1,0 +1,26 @@
+# Stakater Reloader: rolls a Deployment/StatefulSet when a Secret or ConfigMap it uses changes.
+# Opt in per workload with the annotation  reloader.stakater.com/auto: "true"  (oauth2-proxy,
+# Grafana, Keycloak, ...), so values changed in the secret store reach the pods that read them at
+# start-up (env vars) without manual restarts.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: reloader
+---
+apiVersion: helm.cattle.io/v1
+kind: HelmChart
+metadata:
+  name: reloader
+  namespace: kube-system
+spec:
+  repo: https://stakater.github.io/stakater-charts
+  chart: reloader
+  version: 2.2.17
+  targetNamespace: reloader
+  createNamespace: true
+  valuesContent: |-
+    reloader:
+      watchGlobally: true
+      deployment:
+        resources:
+          requests: {cpu: 10m, memory: 32Mi}

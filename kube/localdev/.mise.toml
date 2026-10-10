@@ -1,7 +1,7 @@
 # kube/localdev — ephemeral local kubernetes (k3d)
 #   cluster:  mise run cluster:create [profile] | cluster:profile [profile] | cluster:status | cluster:destroy | cluster:recreate | cluster:secrets | cluster:clean
 #   components/tools: mise run build <component> | pg:psql | kn:forward | keycloak:apply | keycloak:export
-#   secrets:  mise run secrets:sync | secrets:list   (local secret store for External Secrets)
+#   secrets:  mise run secrets:sync | secrets:list | secrets:migrate   (secret store for External Secrets)
 #   mise run grafana:list | grafana:export | grafana:import | grafana:fetch   (see grafana/dashtool.py)
 #   see readme.md
 
@@ -22,7 +22,7 @@ usage = 'arg "[profile]" help="lite | dev | knative | full (see profiles.toml)"'
 run = """#!/bin/bash
 set -euo pipefail
 
-mise run cluster:secrets:check
+mise run secrets:check
 
 # workspace: a host dir mounted into the node at the same path, so external components
 # (local.toml) under it can be linked (live edits). Default: the dir holding this git repo, i.e. its
@@ -58,55 +58,9 @@ if python3 profile.py enabled keycloak; then mise run keycloak:apply; fi
 echo "cluster ready - profile $(python3 profile.py current): $(tr '\n' ' ' < runtime.profile/components)"
 """
 
-[tasks."cluster:secrets:check"]
-description = "Decrypt secrets.env.asc if it's newer than secrets.env, and check all keys are set"
-hide = true
-run = """#!/bin/bash
-set -euo pipefail
-if [ ! -s secrets.env ] || [ secrets.env.asc -nt secrets.env ]; then
-    mise run decrypt "{{config_root}}/secrets.env.asc"
-fi
-set -a; source secrets.env; set +a
-for v in GOOGLE_CLIENT_ID GOOGLE_CLIENT_SECRET COOKIE_SECRET LOCAL_ADMIN_PASSWORD; do
-    [ -n "${!v:-}" ] || { echo "ERROR: $v missing from secrets.env (see readme.md)" >&2; exit 1; }
-done
-"""
-
 [tasks."cluster:secrets"]
-description = "Load secrets.env into the cluster: oauth2-proxy (Google), local admin login, Grafana admin"
-run = """#!/bin/bash
-set -euo pipefail
-mise run cluster:secrets:check
-set -a; source secrets.env; set +a
-apply() { kubectl apply -f - >/dev/null && echo "  $1"; }
-for ns in auth monitoring; do
-    kubectl create namespace $ns --dry-run=client -o yaml | kubectl apply -f - >/dev/null
-done
-kubectl -n auth create secret generic oauth2-proxy \
-    --from-literal=client-id="$GOOGLE_CLIENT_ID" \
-    --from-literal=client-secret="$GOOGLE_CLIENT_SECRET" \
-    --from-literal=cookie-secret="$COOKIE_SECRET" \
-    --dry-run=client -o yaml | apply "auth/oauth2-proxy (Google client, cookie secret)"
-# local login for oauth2-proxy's sign-in form: user admin, bcrypt via htpasswd (password on stdin)
-htline=$(printf '%s' "$LOCAL_ADMIN_PASSWORD" | docker run --rm -i httpd:2.4-alpine htpasswd -niB admin)
-kubectl -n auth create secret generic oauth2-proxy-htpasswd --from-literal=users.txt="$htline" \
-    --dry-run=client -o yaml | apply "auth/oauth2-proxy-htpasswd (local user admin)"
-# Grafana's built-in admin = the same admin (Grafana login form, for non-Google sessions)
-kubectl -n monitoring create secret generic grafana-admin \
-    --from-literal=admin-user=admin --from-literal=admin-password="$LOCAL_ADMIN_PASSWORD" \
-    --dry-run=client -o yaml | apply "monitoring/grafana-admin"
-# Keycloak's bootstrap admin (master realm) = the same admin (only when keycloak is in the profile)
-if python3 profile.py enabled keycloak; then
-kubectl create namespace keycloak --dry-run=client -o yaml | kubectl apply -f - >/dev/null
-kubectl -n keycloak create secret generic keycloak-admin \
-    --from-literal=username=admin --from-literal=password="$LOCAL_ADMIN_PASSWORD" \
-    --dry-run=client -o yaml | apply "keycloak/keycloak-admin"
-fi
-# pods read these at startup: restart the ones that already exist (no-op on a fresh cluster)
-kubectl -n auth rollout restart deploy/oauth2-proxy >/dev/null 2>&1 && echo "  restarted oauth2-proxy" || true
-# apps' secrets: the local store External Secrets reads (secrets.store.toml)
-mise run secrets:sync
-"""
+description = "Same as secrets:sync: load the secret store (secrets.store.toml) into the cluster"
+run = "mise run secrets:sync"
 
 [tasks.build]
 description = "Build a component's image (its build.sh, else its docker/), push it, restart its deployments"
@@ -192,29 +146,58 @@ rmdir runtime.data
 echo "runtime.data deleted."
 """
 
-# --- secrets: local store for the External Secrets Operator (components/external-secrets) -------
-# secrets.store.toml (gitignored; optional encrypted secrets.store.toml.asc) -> Secrets in namespace
-# secret-store, read by ClusterSecretStore `local`. See docs: Secrets.
+# --- secrets: the store behind the External Secrets Operator (components/external-secrets) --------
+# secrets.defaults.toml + components/*/secrets.defaults.toml + secrets.store.toml (gitignored;
+# optional encrypted .asc) -> Secrets in namespace secret-store, read by ClusterSecretStore
+# `localdev`; each consumer's ExternalSecret syncs what it needs. See docs: Secrets.
 
-[tasks."secrets:sync"]
-description = "Load secrets.store.toml into the local secret store (namespace secret-store) and refresh ExternalSecrets"
+[tasks."secrets:check"]
+description = "Decrypt secrets.store.toml.asc if it's newer than secrets.store.toml, and check required secrets are set"
+hide = true
 run = """#!/bin/bash
 set -euo pipefail
 if [ -f secrets.store.toml.asc ] && { [ ! -s secrets.store.toml ] || [ secrets.store.toml.asc -nt secrets.store.toml ]; }; then
     mise run decrypt "{{config_root}}/secrets.store.toml.asc"
 fi
+python3 components/external-secrets/store.py check
+"""
+
+[tasks."secrets:sync"]
+description = "Load the secret store (defaults + secrets.store.toml) into namespace secret-store; ExternalSecrets sync it out"
+run = """#!/bin/bash
+set -euo pipefail
+mise run secrets:check
 kubectl create namespace secret-store --dry-run=client -o yaml | kubectl apply -f - >/dev/null 2>&1
 json=$(python3 components/external-secrets/store.py render)
 if grep -qF '"items": []' <<< "$json"; then   # empty store: apply --prune needs at least one object
-    kubectl -n secret-store delete secret -l localdev/secret-store=managed --ignore-not-found | sed 's/^/  /'
-else   # --prune: secrets removed from the file are removed from the store
-    kubectl apply -f - --prune -l localdev/secret-store=managed --prune-allowlist=core/v1/Secret <<< "$json" | sed 's/^/  /'
+    out=$(kubectl -n secret-store delete secret -l localdev/secret-store=managed --ignore-not-found)
+else   # --prune: entries removed from the files are removed from the store
+    out=$(kubectl apply -f - --prune -l localdev/secret-store=managed --prune-allowlist=core/v1/Secret <<< "$json")
 fi
-python3 components/external-secrets/store.py list
-# ESO re-reads on each ExternalSecret's refreshInterval; force-sync makes it immediate
-if kubectl get crd externalsecrets.external-secrets.io >/dev/null 2>&1; then
+sed 's/^/  /' <<< "$out"
+# ESO re-reads on each ExternalSecret's refreshInterval; force-sync makes it immediate - only when
+# the store changed (templates with a random salt, like the htpasswd line, would re-render and
+# Reloader would roll their pods for nothing). Pods are rolled by Reloader (reloader.stakater.com/auto).
+if grep -qE ' (created|configured|pruned|deleted)' <<< "$out" && kubectl get crd externalsecrets.external-secrets.io >/dev/null 2>&1; then
     kubectl annotate externalsecrets -A --all force-sync="$(date +%s)" --overwrite >/dev/null 2>&1 || true
+    echo "  store changed: ExternalSecrets refreshed"
 fi
+"""
+
+[tasks."secrets:migrate"]
+description = "One-time: create secrets.store.toml from an old secrets.env (Google client, cookie secret, admin password)"
+run = """#!/bin/bash
+set -euo pipefail
+if [ -e secrets.store.toml ]; then echo "secrets.store.toml already exists - not overwriting" >&2; exit 1; fi
+if [ -f secrets.env.asc ] && { [ ! -s secrets.env ] || [ secrets.env.asc -nt secrets.env ]; }; then
+    mise run decrypt "{{config_root}}/secrets.env.asc"
+fi
+[ -f secrets.env ] || { echo "no secrets.env to migrate" >&2; exit 1; }
+(umask 077; python3 components/external-secrets/store.py migrate secrets.env > secrets.store.toml)
+python3 components/external-secrets/store.py check && echo "wrote secrets.store.toml (all required secrets set)"
+echo "next: mise run encrypt secrets.store.toml   # -> secrets.store.toml.asc, commit it"
+echo "      mise run secrets:sync                 # load it into the cluster"
+echo "      then delete secrets.env and secrets.env.asc yourself when you're happy"
 """
 
 [tasks."secrets:list"]
@@ -345,7 +328,8 @@ description = "Save a realm configured in the Keycloak UI back to components/key
 usage = 'arg "[realm]" default="localdev"'
 run = """#!/bin/bash
 set -euo pipefail
-set -a; source secrets.env; set +a
+# the bootstrap admin's password, as synced from the secret store (localdev-admin)
+export LOCAL_ADMIN_PASSWORD="$(kubectl -n keycloak get secret keycloak-admin -o jsonpath='{.data.password}' | base64 -d)"
 kubectl -n keycloak port-forward svc/keycloak 18180:8080 >/dev/null 2>&1 & pf=$!
 trap 'kill $pf' EXIT
 until curl -sf -o /dev/null http://localhost:18180/keycloak/realms/master; do sleep 0.5; done
@@ -389,7 +373,7 @@ for c in $(python3 profile.py buildable); do
     if cut -f1 <<< "$missing" | grep -qx "$c"; then mise run build "$c"; fi
 done
 mise run cluster:profile:sync
-if python3 profile.py enabled keycloak; then mise run cluster:secrets >/dev/null; mise run keycloak:apply; fi
+if python3 profile.py enabled keycloak; then mise run keycloak:apply; fi
 echo "profile $to active: $(tr '\n' ' ' < runtime.profile/components)"
 if [ "$failed" = 1 ]; then echo "some deletions timed out - re-run 'mise run cluster:profile $to' to finish" >&2; exit 1; fi
 """

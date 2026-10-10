@@ -115,6 +115,10 @@ data:
             - {kind: Deployment, namespace: external-secrets, name: external-secrets-webhook}
             - {kind: Deployment, namespace: external-secrets, name: external-secrets-cert-controller}
             - {kind: HelmChart, name: external-secrets}
+        - name: Reloader
+          checks:
+            - {kind: Deployment, namespace: reloader, name: reloader-reloader}
+            - {kind: HelmChart, name: reloader}
     - group: tools
       items:
         - name: Postgres

@@ -7,7 +7,7 @@ one folder, `components/<name>/` in this repo, or a folder in your own project r
 | component | what | in profiles |
 |---|---|---|
 | cnav | cluster navigator at `/` | all (always on, infra layer) |
-| external-secrets | External Secrets Operator + the `local` secret store | all (always on, infra layer) |
+| external-secrets | External Secrets Operator, Reloader, the `localdev` secret store | all (always on, infra layer) |
 | postgres | Postgres + pgweb (`/pgweb`) | dev, knative, full |
 | nats | NATS + JetStream, NUI (`/nats`) | dev, knative, full |
 | docs | these docs (`/docs`) | dev, knative, full |
@@ -22,6 +22,7 @@ components/<name>/
   dashboards/    optional: Grafana dashboards, shown in Grafana's "tools" folder
   docker/        optional: application code + Dockerfile, built by `mise run build <name>`
   build.sh       optional: a custom image build, used instead of building docker/ directly
+  secrets.defaults.toml  optional: the component's entries in the secret store (fixed dev values)
   ...            anything else the component owns: examples, config-as-code, tooling
                  (e.g. knative/examples/, keycloak/realms/ + realmtool.py)
 ```

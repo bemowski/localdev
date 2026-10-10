@@ -182,8 +182,9 @@ every deployment `localdev/component: <name>` so `mise run build <name>` restart
 
 ## Secrets
 
-Don't put secret values in the manifest: declare an **ExternalSecret** against the `local` store,
-and keep the values in your gitignored `secrets.store.toml`. See [Secrets](secrets.md).
+Don't put secret values in the manifest: declare an **ExternalSecret** against the `localdev` store
+(in its own file), keep the values in your gitignored `secrets.store.toml` (fixed dev values can go in
+your component's `secrets.defaults.toml`), and annotate the Deployment for Reloader. See [Secrets](secrets.md).
 
 ## Databases and other setup
 

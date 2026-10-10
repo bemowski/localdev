@@ -1,33 +1,18 @@
 # Keycloak 26 — OIDC/OAuth identity provider for *apps* (realms, clients, roles, test users).
 # localdev's own SSO (oauth2-proxy) is separate and unchanged.
 #
-#   admin console:  http://localhost/keycloak/admin/        (behind localdev SSO; admin / LOCAL_ADMIN_PASSWORD)
+#   admin console:  http://localhost/keycloak/admin/        (behind localdev SSO; admin / localdev-admin password)
 #   issuer:         http://localhost/keycloak/realms/<realm> (public: login pages, token, discovery)
 #   in-cluster:     http://keycloak.keycloak.svc:8080/keycloak  (backchannel: token/JWKS from pods;
 #                   tokens keep the localhost issuer - KC_HOSTNAME_BACKCHANNEL_DYNAMIC)
 #   realms:         components/keycloak/realms/*.json, applied by `mise run keycloak:apply` (keycloak-config-cli)
 #
 # Data: database "keycloak" on pg/postgres (runtime.data), created by the init container.
-# Secret keycloak-admin comes from `mise run cluster:secrets`.
+# Secrets keycloak-db and keycloak-admin are ExternalSecrets: 30-6-0-keycloak-secrets.yaml.
 apiVersion: v1
 kind: Namespace
 metadata:
   name: keycloak
----
-apiVersion: v1
-kind: Secret
-metadata:
-  name: keycloak-db
-  namespace: keycloak
-type: Opaque
-stringData:
-  # Keycloak's own DB login (dev only)
-  username: keycloak
-  password: keycloak
-  # Postgres superuser, only used by the init container to create the role/database
-  # (same fixed dev credentials as pg/postgres-app)
-  pg-admin-user: app
-  pg-admin-password: localdev
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -35,6 +20,7 @@ metadata:
   name: keycloak
   namespace: keycloak
   labels: {app: keycloak}
+  annotations: {reloader.stakater.com/auto: "true"}   # roll when keycloak-db / keycloak-admin change
 spec:
   replicas: 1
   strategy: {type: Recreate}   # one instance at a time against the DB

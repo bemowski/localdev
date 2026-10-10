@@ -4,7 +4,7 @@
 #
 # Names mirror what CloudNativePG creates for a Cluster called "postgres", so apps can
 # move to CNPG later without changes:
-#   Service postgres-rw (read-write endpoint), Secret postgres-app (username, password,
+#   Service postgres-rw (read-write endpoint), Secret postgres-app (30-1-postgres-secrets.yaml: username, password,
 #   dbname, host, port, uri, jdbc-uri). Data would move with pg_dump/pg_restore.
 #
 # Fixed dev credentials: app / localdev, database app. Local only.
@@ -12,21 +12,6 @@ apiVersion: v1
 kind: Namespace
 metadata:
   name: pg
----
-apiVersion: v1
-kind: Secret
-metadata:
-  name: postgres-app
-  namespace: pg
-type: kubernetes.io/basic-auth
-stringData:
-  username: app
-  password: localdev
-  dbname: app
-  host: postgres-rw.pg.svc
-  port: "5432"
-  uri: postgresql://app:localdev@postgres-rw.pg.svc:5432/app
-  jdbc-uri: jdbc:postgresql://postgres-rw.pg.svc:5432/app?user=app&password=localdev
 ---
 apiVersion: apps/v1
 kind: StatefulSet
