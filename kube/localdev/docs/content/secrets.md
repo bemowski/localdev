@@ -18,10 +18,36 @@ Today the store is **local**: no cloud account needed. Moving it to a cloud secr
 | entry | keys | consumers (ExternalSecret → Secret) |
 |---|---|---|
 | `sso` | `google-client-id`, `google-client-secret`, `cookie-secret` | `auth/oauth2-proxy` |
+| `sso-access` | `emails`, `domains` (lists) | `auth/oauth2-proxy-access`: who may sign in with Google |
 | `localdev-admin` | `username`, `password` | `auth/oauth2-proxy-htpasswd` (bcrypt line, built by ESO), `monitoring/grafana-admin`, `keycloak/keycloak-admin` |
 | `postgres-app` | `username`, `password`, `dbname` | `pg/postgres-app` (+ `host`, `port`, `uri`, `jdbc-uri`), `keycloak/keycloak-db` |
 | `keycloak-db` | `username`, `password` | `keycloak/keycloak-db` |
 | *your entries* | | your components' ExternalSecrets |
+
+## Who can sign in
+
+oauth2-proxy lets a Google account in when it matches the `[sso-access]` entry (the local `admin`
+user is not affected). Set it in `secrets.store.toml`, then `mise run secrets:sync`:
+
+```toml
+[sso-access]
+emails = ["you@gmail.com", "teammate@gmail.com"]   # exact addresses
+domains = ["example.com"]                          # anyone @example.com
+```
+
+| `domains` value | lets in | doesn't let in |
+|---|---|---|
+| `"example.com"` | `ann@example.com` | `ann@eng.example.com` |
+| `".example.com"` (or `"*.example.com"`) | `ann@eng.example.com`, `bo@a.b.example.com` | `ann@example.com` (list both for both) |
+| `"*"` | any Google account | — |
+
+- An account gets in if it matches **either** list. With both empty, nobody can sign in with Google.
+- The lists are stored one item per line. ESO turns them into Secret `auth/oauth2-proxy-access`:
+  `emails` becomes oauth2-proxy's authenticated-emails file, and `domains`, comma-joined, its
+  `--email-domain` flag. Reloader rolls oauth2-proxy when that Secret changes.
+- While the Google consent screen is in **Testing** mode, Google itself only lets its listed test
+  users sign in, so a domain here doesn't open the door to anyone else until the app is published.
+  Be careful with `"*"` on a published app: every Google account in the world would get in.
 
 ## Where the values come from
 
@@ -39,6 +65,10 @@ The store's values are merged from these files, later ones winning:
 google-client-id = "1234-abc.apps.googleusercontent.com"
 google-client-secret = "GOCSPX-..."
 cookie-secret = "..."            # openssl rand -base64 32 | tr -- '+/' '-_'
+
+[sso-access]                     # who may sign in with Google (lists)
+emails = ["you@gmail.com"]
+domains = []                     # e.g. ["example.com"]
 
 [localdev-admin]
 password = "..."

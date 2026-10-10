@@ -69,7 +69,7 @@ mise run grafana:check                      # JSON valid + uids unique (a duplic
 See the docs: [Getting started](docs/content/getting-started.md) (profiles), [Cluster layout](docs/content/cluster-layout.md) (layers, `runtime.profile/`, manifest rules) and [Components](docs/content/components.md) (component folders, `profiles.toml` metadata, adding one).
 
 **Signing in.** Every app goes through oauth2-proxy (each namespace has an `sso` forwardAuth Middleware). Its sign-in page offers two ways in:
-- **Sign in with Google.** Only accounts on the **allow-list** in `manifests/10-platform/10-2-oauth2-proxy.yaml` (`authenticatedEmailsFile.restricted_access`, one per line) get in, and the list applies to every app. Google accounts must also be test users on the consent screen (below).
+- **Sign in with Google.** Only accounts on the **allow-list** get in, and it applies to every app. The list is `[sso-access]` in `secrets.store.toml`: `emails` for exact addresses and `domains` for whole domains (`"example.com"`, or `".example.com"` for any subdomain). Edit it, then `mise run secrets:sync`. See [Secrets](docs/content/secrets.md#who-can-sign-in). Google accounts must also be test users on the consent screen (below), unless the app is published.
 - **Username and password:** user `admin`, password `[localdev-admin] password` from `secrets.store.toml`. This works offline, since nothing goes to Google. Local sessions have no email, so the allow-list doesn't apply to them.
   - Apps that sign you in from the email header (Grafana) show their own login form for `admin` instead. Grafana's built-in admin is set to the same `admin` and password.
   - To change the password: edit `secrets.store.toml`, run `mise run secrets:sync` (Reloader rolls oauth2-proxy and Grafana), and `mise run encrypt secrets.store.toml` to update the shared copy.
@@ -293,7 +293,7 @@ oauth2-proxy needs a Google OAuth client ID and secret, plus a cookie secret.
 2. **Set up the consent screen.** Open **APIs & Services → OAuth consent screen**. This now lives under **Google Auth Platform**.
    - Under **Branding**, set the app name (`localdev`), a user support email and a developer contact email.
    - Under **Audience**, set the user type to **External** and the publishing status to **Testing**.
-   - Under **Test users**, add every Google account that should be able to sign in. In Testing mode, only these accounts can log in, with a maximum of 100. The cluster's allow-list (`10-2-oauth2-proxy.yaml`) narrows this further.
+   - Under **Test users**, add every Google account that should be able to sign in. In Testing mode, only these accounts can log in, with a maximum of 100. The cluster's allow-list (`[sso-access]` in `secrets.store.toml`) narrows this further.
    - No scopes need adding. oauth2-proxy only asks for `openid email profile`, which are non-sensitive, so Google doesn't need to verify the app.
 
 3. **Create the client.** Go to **Google Auth Platform → Clients → Create client**.

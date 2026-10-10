@@ -54,7 +54,7 @@ metadata:
   namespace: registry
 spec:
   forwardAuth:
-    address: http://oauth2-proxy.auth.svc.cluster.local/   # signed in: 202 + identity headers; signed out: sign-in page (allow-list: 10-2-oauth2-proxy.yaml)
+    address: http://oauth2-proxy.auth.svc.cluster.local/   # signed in: 202 + identity headers; signed out: sign-in page (allow-list: [sso-access] in the secret store)
     authResponseHeaders: [X-Auth-Request-Email, X-Auth-Request-User]
 ---
 # /registry -> /registry/ so the UI's relative asset paths resolve under the prefix

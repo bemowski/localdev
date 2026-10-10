@@ -13,7 +13,8 @@ store's values are merged, later wins:
     username = "app"
     password = "localdev"
 
-A value "" in a defaults file means REQUIRED: it must be set in secrets.store.toml.
+A value "" in a defaults file means REQUIRED: it must be set in secrets.store.toml. A list
+(emails = ["a@x.com", "b@x.com"]) is stored as one item per line.
 
   render    print the Secrets (JSON List) for namespace secret-store, labelled
             localdev/secret-store=managed, for `kubectl apply --prune`
@@ -59,7 +60,8 @@ def load():
             for k, v in keys.items():
                 if v == "" and path != STORE:
                     required.add((entry, k))
-                data.setdefault(entry, {})[k] = str(v)
+                # a list becomes one item per line (e.g. an allow-list file); consumers can split it
+                data.setdefault(entry, {})[k] = "\n".join(map(str, v)) if isinstance(v, list) else str(v)
                 origin[(entry, k)] = label
     return data, origin, required
 
