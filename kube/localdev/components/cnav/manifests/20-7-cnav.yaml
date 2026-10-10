@@ -109,6 +109,12 @@ data:
         - name: cnav
           checks:
             - {kind: Deployment, namespace: cnav, name: cnav}
+        - name: External Secrets
+          checks:
+            - {kind: Deployment, namespace: external-secrets, name: external-secrets}
+            - {kind: Deployment, namespace: external-secrets, name: external-secrets-webhook}
+            - {kind: Deployment, namespace: external-secrets, name: external-secrets-cert-controller}
+            - {kind: HelmChart, name: external-secrets}
     - group: tools
       items:
         - name: Postgres

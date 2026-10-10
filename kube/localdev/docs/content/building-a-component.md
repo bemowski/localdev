@@ -180,6 +180,11 @@ For a UI and a few APIs, one component can hold them all: one manifest per servi
 and a `build.sh` that builds and pushes each image as `$REGISTRY/<name>-<service>:latest`. Label
 every deployment `localdev/component: <name>` so `mise run build <name>` restarts them all.
 
+## Secrets
+
+Don't put secret values in the manifest: declare an **ExternalSecret** against the `local` store,
+and keep the values in your gitignored `secrets.store.toml`. See [Secrets](secrets.md).
+
 ## Databases and other setup
 
 Postgres runs in namespace `pg` with fixed local credentials (`app` / `localdev`); from a component,

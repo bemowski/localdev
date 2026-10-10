@@ -30,3 +30,7 @@ requires = ["postgres"]
 [components.cnav]
 layer = "infra"                # deploy with infra, before the tools
 always = true
+
+[components.external-secrets]
+layer = "infra"                # apps' ExternalSecrets need it; local store: secrets.store.toml
+always = true

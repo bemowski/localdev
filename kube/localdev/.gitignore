@@ -5,3 +5,4 @@ runtime.data/
 runtime.profile/
 local.toml
 .mise.local.toml
+secrets.store.toml

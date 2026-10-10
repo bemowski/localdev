@@ -13,6 +13,7 @@ nav:
   - Cluster layout: cluster-layout.md
   - Components: components.md
   - Building a component: building-a-component.md
+  - Secrets: secrets.md
 
 theme:
   name: material

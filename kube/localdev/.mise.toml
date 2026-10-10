@@ -1,6 +1,7 @@
 # kube/localdev — ephemeral local kubernetes (k3d)
 #   cluster:  mise run cluster:create [profile] | cluster:profile [profile] | cluster:status | cluster:destroy | cluster:recreate | cluster:secrets | cluster:clean
 #   components/tools: mise run build <component> | pg:psql | kn:forward | keycloak:apply | keycloak:export
+#   secrets:  mise run secrets:sync | secrets:list   (local secret store for External Secrets)
 #   mise run grafana:list | grafana:export | grafana:import | grafana:fetch   (see grafana/dashtool.py)
 #   see readme.md
 
@@ -103,6 +104,8 @@ kubectl -n keycloak create secret generic keycloak-admin \
 fi
 # pods read these at startup: restart the ones that already exist (no-op on a fresh cluster)
 kubectl -n auth rollout restart deploy/oauth2-proxy >/dev/null 2>&1 && echo "  restarted oauth2-proxy" || true
+# apps' secrets: the local store External Secrets reads (secrets.store.toml)
+mise run secrets:sync
 """
 
 [tasks.build]
@@ -187,6 +190,39 @@ fi
 docker run --rm -v "$PWD/runtime.data:/data" alpine:3.22 sh -c 'rm -rf /data/* /data/.[!.]* 2>/dev/null; true'
 rmdir runtime.data
 echo "runtime.data deleted."
+"""
+
+# --- secrets: local store for the External Secrets Operator (components/external-secrets) -------
+# secrets.store.toml (gitignored; optional encrypted secrets.store.toml.asc) -> Secrets in namespace
+# secret-store, read by ClusterSecretStore `local`. See docs: Secrets.
+
+[tasks."secrets:sync"]
+description = "Load secrets.store.toml into the local secret store (namespace secret-store) and refresh ExternalSecrets"
+run = """#!/bin/bash
+set -euo pipefail
+if [ -f secrets.store.toml.asc ] && { [ ! -s secrets.store.toml ] || [ secrets.store.toml.asc -nt secrets.store.toml ]; }; then
+    mise run decrypt "{{config_root}}/secrets.store.toml.asc"
+fi
+kubectl create namespace secret-store --dry-run=client -o yaml | kubectl apply -f - >/dev/null 2>&1
+json=$(python3 components/external-secrets/store.py render)
+if grep -qF '"items": []' <<< "$json"; then   # empty store: apply --prune needs at least one object
+    kubectl -n secret-store delete secret -l localdev/secret-store=managed --ignore-not-found | sed 's/^/  /'
+else   # --prune: secrets removed from the file are removed from the store
+    kubectl apply -f - --prune -l localdev/secret-store=managed --prune-allowlist=core/v1/Secret <<< "$json" | sed 's/^/  /'
+fi
+python3 components/external-secrets/store.py list
+# ESO re-reads on each ExternalSecret's refreshInterval; force-sync makes it immediate
+if kubectl get crd externalsecrets.external-secrets.io >/dev/null 2>&1; then
+    kubectl annotate externalsecrets -A --all force-sync="$(date +%s)" --overwrite >/dev/null 2>&1 || true
+fi
+"""
+
+[tasks."secrets:list"]
+description = "Show the local secret store (names and keys, no values) and the ExternalSecrets using it"
+run = """#!/bin/bash
+python3 components/external-secrets/store.py list
+kubectl get clustersecretstores 2>/dev/null
+kubectl get externalsecrets -A 2>/dev/null
 """
 
 [tasks."pg:psql"]

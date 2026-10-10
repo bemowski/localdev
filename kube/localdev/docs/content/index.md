@@ -13,6 +13,7 @@ Kubernetes that runs their apps the way production does. All it needs is mise an
 - **[Cluster layout](cluster-layout.md)**: the layers (platform, infra, tools, apps) and how files become a running cluster.
 - **[Components](components.md)**: the components that ship with localdev, and what a component folder holds.
 - **[Building a component](building-a-component.md)**: hook your own app in, from its own repo and its own build.
+- **[Secrets](secrets.md)**: External Secrets with a local store, the same manifests as production.
 
 !!! tip "Where things are"
     Start at [http://localhost/](http://localhost/), the cluster navigator: a card for every app and a live

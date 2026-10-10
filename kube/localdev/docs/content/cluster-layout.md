@@ -6,7 +6,7 @@ applies on its own (its "auto-deploy" manifests folder): saving a file re-applie
 | layer | always on | what |
 |---|---|---|
 | **10-platform** | yes | Traefik config (ingress), oauth2-proxy (single sign-on) |
-| **20-infra** | yes | Headlamp, Prometheus / Alertmanager / Grafana, Loki + Alloy (logs), Tempo (traces), registry UI, cnav |
+| **20-infra** | yes | Headlamp, Prometheus / Alertmanager / Grafana, Loki + Alloy (logs), Tempo (traces), registry UI, cnav, External Secrets |
 | **30-tools** | by profile | the optional components: Postgres, NATS, Knative, Keycloak, docs |
 | **50-apps** | yes | your apps (whoami, the SSO test app, to start with) |
 

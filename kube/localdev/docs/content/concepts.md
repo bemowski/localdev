@@ -86,6 +86,11 @@ at deployment time show up while the code is still being written.
 :   The host folder mounted into the cluster so external components can be followed live; by
     default, the folder holding this repo (so its sibling projects).
 
+**Secret store**
+:   Where apps' secrets come from. Apps declare ExternalSecrets; the External Secrets Operator
+    fetches the values. Locally a store called `local` answers from your gitignored
+    `secrets.store.toml`; cloud stores (GCP, AWS, Vault) can be added. See [Secrets](secrets.md).
+
 **Deploy hook** *(planned)*
 :   A component's `deploy.sh`, run after it is installed, to set up what manifests can't express
     well: a database schema, a Keycloak realm, NATS streams.

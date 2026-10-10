@@ -2,7 +2,7 @@
 
 Ephemeral local Kubernetes (k3d) with path-based routing on `http://localhost/<app>`, behind Google SSO.
 
-**Docs:** [http://localhost/docs/](http://localhost/docs/) when the cluster runs (source: [`docs/content/`](docs/content/)): concepts, getting started, moving from docker compose, cluster layout, components, and building your own component (including from another project, via a gitignored `local.toml`). This readme keeps the setup and reference details.
+**Docs:** [http://localhost/docs/](http://localhost/docs/) when the cluster runs (source: [`docs/content/`](docs/content/)): concepts, getting started, moving from docker compose, cluster layout, components, building your own component (including from another project, via a gitignored `local.toml`), and secrets (External Secrets Operator with a local store: `secrets.store.toml`, `mise run secrets:sync`). This readme keeps the setup and reference details.
 
 | path | app |
 |---|---|

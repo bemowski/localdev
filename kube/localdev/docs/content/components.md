@@ -7,6 +7,7 @@ one folder, `components/<name>/` in this repo, or a folder in your own project r
 | component | what | in profiles |
 |---|---|---|
 | cnav | cluster navigator at `/` | all (always on, infra layer) |
+| external-secrets | External Secrets Operator + the `local` secret store | all (always on, infra layer) |
 | postgres | Postgres + pgweb (`/pgweb`) | dev, knative, full |
 | nats | NATS + JetStream, NUI (`/nats`) | dev, knative, full |
 | docs | these docs (`/docs`) | dev, knative, full |
