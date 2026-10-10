@@ -380,11 +380,14 @@ if [ "$failed" = 1 ]; then echo "some deletions timed out - re-run 'mise run clu
 """
 
 [tasks."cluster:profile:sync"]
-description = "Publish the enabled components to cnav (ConfigMap localdev-profile)"
+description = "Publish the enabled components (cnav/localdev-profile) and host facts (kube-system/localdev-host)"
 hide = true
 run = """#!/bin/bash
 set -euo pipefail
 kubectl create namespace cnav --dry-run=client -o yaml | kubectl apply -f - >/dev/null
 kubectl -n cnav create configmap localdev-profile --from-file=components=runtime.profile/components \
     --from-literal=profile="$(python3 profile.py current)" --dry-run=client -o yaml | kubectl apply -f - >/dev/null
+# who/what runs this cluster (username, host OS, k3d version): pods can't see the host
+kubectl -n kube-system create configmap localdev-host --from-env-file=<(python3 hostfacts.py) \
+    --dry-run=client -o yaml | kubectl apply -f - >/dev/null
 """

@@ -5,6 +5,7 @@
 #   mise run api:docs     render the spec to build/api.html
 #   mise run api:test     lint + check
 #   mise run server:test | server:image | server:dev   (delegate to server/.mise.toml)
+#   mise run agent:test | agent:image                   (delegate to cluster-agent/.mise.toml)
 
 [tools]
 node = '22.23.2'   # npx @redocly/cli
@@ -49,3 +50,14 @@ run = "mise run image"
 description = "Run the server locally against localdev's Postgres"
 dir = "{{config_root}}/server"
 run = "mise run dev"
+
+# cluster-agent/ has its own .mise.toml; these delegate to it
+[tasks."agent:test"]
+description = "Run the cluster-agent tests (cluster-agent/)"
+dir = "{{config_root}}/cluster-agent"
+run = "mise run test"
+
+[tasks."agent:image"]
+description = "Build the cluster-agent image"
+dir = "{{config_root}}/cluster-agent"
+run = "mise run image"

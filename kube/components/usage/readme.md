@@ -15,7 +15,8 @@ examples/          request bodies: *.json valid, invalid/*.json must be rejected
 scripts/           check_examples.py (validates examples against the spec)
 redocly.yaml       lint rules
 server/            ingest server, a complete component: manifests/, docker/, build.sh, own .mise.toml
-client/            CLI + local spool, stdlib Python          (next)
+cluster-agent/     in-cluster event emitter: stdlib Python pod in kube-system (infra component)
+client/            host-side CLI + local spool, stdlib Python   (later)
 ```
 
 ## Tasks
@@ -92,11 +93,41 @@ path = "../components/usage/server"
 requires = ["postgres"]
 layer = "apps"
 
+[components.usage-agent]
+path = "../components/usage/cluster-agent"
+layer = "infra"
+
 [profiles]
-usage = { description = "dev + the usage server", components = ["postgres", "nats", "docs", "usage"] }
+usage = { description = "dev + usage server + agent", components = ["postgres", "nats", "docs", "usage", "usage-agent"] }
 ```
 
 Then `mise run cluster:profile usage` (or `cluster:create usage`). `mise run cluster:profile dev` removes it.
+
+## Cluster agent (`cluster-agent/`)
+
+One stdlib-only Python pod (`docker/agent.py`) in `kube-system` that watches the cluster and sends
+events to `USAGE_URL` (default `http://usage.usage.svc`, set in the manifest). It's a localdev
+**infra** component named `usage-agent` (`manifests/20-10-usage-agent.yaml`).
+
+| event | when |
+|---|---|
+| `localdev.cluster.created` | once per cluster. `cluster_id` is the `kube-system` namespace UID, `occurred_at` its creation time |
+| `localdev.cluster.event` `profile.changed` | `cnav/localdev-profile` changes (profile or components) |
+| `localdev.cluster.event` `app.deployed` | a Deployment in a user namespace is created or changed (new generation). User namespaces are those not created by localdev's manifests (no `objectset.rio.cattle.io/hash` label) and not `kube-*` |
+| `localdev.cluster.event` `cluster.heartbeat` | at start and every 15 min. The agent dies with the cluster, so it can't send `destroyed`; heartbeats give "last seen" |
+
+- **Host facts:** username, host OS and k3d version come from ConfigMap `kube-system/localdev-host`,
+  which localdev's `cluster:create` / `cluster:profile` write (`kube/localdev/hostfacts.py`).
+  Until it exists, the agent sends nothing.
+- **Best-effort delivery:** one file per event in an `emptyDir` spool, POSTed in batches every 30 s.
+  - 5xx or unreachable: kept and retried.
+  - 422: only the rejected events are dropped.
+  - The spool is capped at 1000 files and 3 days.
+- **Restarts are harmless:** created and app events have ids derived from the cluster id (uuid5), so
+  a restarted agent resends them and the server counts them as duplicates.
+- **Deploy:** in `kube/localdev/local.toml`, `[components.usage-agent] path = "../components/usage/cluster-agent"`,
+  `layer = "infra"`, and add `usage-agent` to your profile. `mise run build usage-agent` rebuilds it.
+- **Tests:** `cd cluster-agent && mise run test` (unittest, plus a contract test of every event against `openapi.yaml`).
 
 ## Adding an event type
 
