@@ -3,6 +3,7 @@
 #   alloy.monitoring.svc:4317 (gRPC) / :4318 (HTTP)
 # and it routes metrics -> Prometheus, logs -> Loki, traces -> Tempo (20-5-tracing.yaml).
 # Query in Grafana -> Explore. No UI of its own, so no ingress.
+# Loki's data is in runtime.data/loki (kept 72h), so logs survive `mise run cluster:recreate`.
 apiVersion: helm.cattle.io/v1
 kind: HelmChart
 metadata:
@@ -29,8 +30,28 @@ spec:
             object_store: filesystem
             schema: v13
             index: {prefix: index_, period: 24h}
+      # data persists in runtime.data/loki, so delete old logs (default: keep forever)
+      compactor:
+        retention_enabled: true
+        delete_request_store: filesystem
+      limits_config:
+        retention_period: 72h
     singleBinary:
       replicas: 1
+      # /var/loki in runtime.data/loki: PV loki-data below
+      persistence:
+        storageClass: runtime-data
+        enableStatefulSetAutoDeletePVC: false   # keep the claim (and its PV binding) if the StatefulSet is replaced
+      nodeSelector:
+        node-role.kubernetes.io/control-plane: "true"   # runtime.data is on the server node
+      # loki runs as 10001; the hostPath dir starts root-owned (fsGroup doesn't apply)
+      initContainers:
+        - name: chown-data
+          image: busybox:1.37
+          command: ["sh", "-c", "chown -R 10001:10001 /var/loki"]
+          securityContext: {runAsUser: 0, runAsNonRoot: false}
+          volumeMounts:
+            - {name: storage, mountPath: /var/loki}
     read: {replicas: 0}
     write: {replicas: 0}
     backend: {replicas: 0}
@@ -39,6 +60,25 @@ spec:
     resultsCache: {enabled: false}
     lokiCanary: {enabled: false}
     test: {enabled: false}
+---
+# Loki's data in runtime.data/loki (survives `mise run cluster:recreate`). hostPath on the server
+# node, bound by name; class runtime-data has no provisioner (see 20-2-monitoring.yaml).
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: loki-data
+spec:
+  storageClassName: runtime-data
+  capacity: {storage: 10Gi}            # nominal: hostPath isn't size-limited (retention_period is)
+  accessModes: [ReadWriteOnce]
+  persistentVolumeReclaimPolicy: Retain
+  claimRef: {namespace: monitoring, name: storage-loki-0}
+  hostPath: {path: /runtime.data/loki, type: DirectoryOrCreate}
+  nodeAffinity:
+    required:
+      nodeSelectorTerms:
+        - matchExpressions:
+            - {key: node-role.kubernetes.io/control-plane, operator: In, values: ["true"]}
 ---
 apiVersion: helm.cattle.io/v1
 kind: HelmChart

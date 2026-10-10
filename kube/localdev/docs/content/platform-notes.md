@@ -27,8 +27,8 @@ Items marked **(to confirm)** are expected to work but haven't been tried on tha
 - **Clone under `~`.** Rancher Desktop shares only your home folder with its VM. The cluster mounts
   the repo, its parent folder (the workspace) and `runtime.data/` from the host by path, so a clone
   elsewhere gives empty mounts and pods that can't find their files.
-- **File ownership in `runtime.data/`** (to confirm). Postgres, Tempo and NATS `chown` their data
-  folders. This needs the **virtiofs** mount type (Preferences → Virtual Machine → Volumes). If
+- **File ownership in `runtime.data/`** (to confirm). Postgres, NATS, Prometheus, Loki, Tempo and Grafana
+  `chown` their data folders. This needs the **virtiofs** mount type (Preferences → Virtual Machine → Volumes). If
   Postgres fails with `data directory ... has wrong ownership`, check that setting, then
   `mise run cluster:destroy`, `mise run cluster:clean` and `mise run cluster:create`.
 - **Rancher Desktop's Kubernetes must be off.** Its Traefik takes port 80, and it uses memory for a

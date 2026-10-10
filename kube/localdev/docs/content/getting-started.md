@@ -145,7 +145,7 @@ Coming from docker compose? See [Moving from Docker Compose](from-docker-compose
 mise run cluster:status            # profile, nodes, helm jobs, ingresses
 mise run build <component>         # rebuild a component's image (cnav, docs) and restart it
 mise run secrets:sync              # reload secrets.store.toml into the secret store
-mise run cluster:recreate          # destroy + create (runtime.data is kept)
+mise run cluster:recreate          # destroy + create (runtime.data is kept: data, metrics, logs, traces)
 mise run cluster:destroy           # delete the cluster
 mise run cluster:clean             # delete runtime.data (cluster must be destroyed)
 ```

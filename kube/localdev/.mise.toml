@@ -121,7 +121,7 @@ kubectl get ingress,ingressroutes -A 2>/dev/null
 """
 
 [tasks."cluster:clean"]
-description = "Delete runtime.data (postgres data, registry images). Cluster must be destroyed first."
+description = "Delete runtime.data (postgres, nats, telemetry, grafana, registry images). Cluster must be destroyed first."
 usage = 'flag "-y --yes" help="skip the confirmation prompt"'
 raw = true   # interactive prompt
 run = """#!/bin/bash
@@ -141,7 +141,7 @@ if [ "${usage_yes:-false}" != "true" ]; then
     read -r -p "Type 'clean' to confirm: " answer
     [ "$answer" = "clean" ] || { echo "Aborted."; exit 1; }
 fi
-# contents are owned by container users (root, postgres uid 999): delete via docker, not sudo
+# contents are owned by container users (root, postgres 999, prometheus 1000, grafana 472, loki/tempo 10001): delete via docker, not sudo
 docker run --rm -v "$PWD/runtime.data:/data" alpine:3.22 sh -c 'rm -rf /data/* /data/.[!.]* 2>/dev/null; true'
 rmdir runtime.data
 echo "runtime.data deleted."

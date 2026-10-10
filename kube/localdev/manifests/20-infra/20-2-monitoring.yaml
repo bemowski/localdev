@@ -1,6 +1,7 @@
 # kube-prometheus-stack at /grafana, /prometheus, /alertmanager — all behind SSO.
 # Grafana trusts the X-Auth-Request-Email header from oauth2-proxy (no second login).
-# No persistence: data lives as long as the cluster.
+# Prometheus and Grafana keep their data in runtime.data/{prometheus,grafana} (static hostPath PVs at
+# the end of this file), so it survives `mise run cluster:recreate`; Alertmanager's is ephemeral.
 apiVersion: v1
 kind: Namespace
 metadata:
@@ -43,6 +44,23 @@ spec:
       # built-in dashboards were copied into grafana/dashboards, so they're switched off here.
       nodeSelector:
         node-role.kubernetes.io/control-plane: "true"
+      # grafana.db (UI-made dashboards, preferences) in runtime.data/grafana: PV grafana-data below;
+      # the chart's initChownData chowns it to Grafana's uid
+      persistence:
+        enabled: true
+        storageClassName: runtime-data
+        volumeName: grafana-data
+        size: 1Gi
+      deploymentStrategy: {type: Recreate}   # one pod at a time on grafana.db (sqlite)
+      # The admin password env only applies when grafana.db is first created; reset it on every start
+      # so a changed localdev-admin password (Reloader restarts the pod) still takes effect.
+      lifecycleHooks:
+        postStart:
+          exec:
+            command:
+              - sh
+              - -c
+              - for i in $(seq 30); do grafana cli --homepath /usr/share/grafana admin reset-admin-password "$GF_SECURITY_ADMIN_PASSWORD" >/dev/null 2>&1 && exit 0; sleep 2; done; exit 0
       extraVolumes:
         - name: localdev-repo
           hostPath: {path: /localdev, type: Directory}
@@ -138,7 +156,26 @@ spec:
       prometheusSpec:
         routePrefix: /prometheus
         externalUrl: http://localhost/prometheus
-        retention: 2d
+        # TSDB in runtime.data/prometheus (PV below), bounded by time and size
+        retention: 3d
+        retentionSize: 5GB
+        storageSpec:
+          volumeClaimTemplate:
+            spec:
+              storageClassName: runtime-data
+              volumeName: prometheus-data
+              accessModes: [ReadWriteOnce]
+              resources: {requests: {storage: 10Gi}}
+        nodeSelector:
+          node-role.kubernetes.io/control-plane: "true"   # runtime.data is on the server node
+        # prometheus runs as 1000:2000; the hostPath dir starts root-owned (fsGroup doesn't apply)
+        initContainers:
+          - name: chown-data
+            image: busybox:1.37
+            command: ["sh", "-c", "chown -R 1000:2000 /prometheus"]
+            securityContext: {runAsUser: 0, runAsNonRoot: false}
+            volumeMounts:
+              - {name: prometheus-kps-prometheus-db, mountPath: /prometheus}
         # OpenTelemetry: Alloy pushes app metrics via OTLP (/prometheus/api/v1/otlp), Tempo's
         # metrics generator pushes span metrics + service graph via remote write
         enableOTLPReceiver: true
@@ -205,3 +242,39 @@ spec:
                 name: kps-alertmanager
                 port:
                   number: 9093
+---
+# runtime.data PVs: hostPath on the server node, bound to their claim by name (volumeName).
+# Class runtime-data has no provisioner, so k3s's local-path leaves these claims alone.
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: prometheus-data
+spec:
+  storageClassName: runtime-data
+  capacity: {storage: 10Gi}            # nominal: hostPath isn't size-limited (retentionSize is)
+  accessModes: [ReadWriteOnce]
+  persistentVolumeReclaimPolicy: Retain
+  claimRef: {namespace: monitoring, name: prometheus-kps-prometheus-db-prometheus-kps-prometheus-0}
+  hostPath: {path: /runtime.data/prometheus, type: DirectoryOrCreate}
+  nodeAffinity:
+    required:
+      nodeSelectorTerms:
+        - matchExpressions:
+            - {key: node-role.kubernetes.io/control-plane, operator: In, values: ["true"]}
+---
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: grafana-data
+spec:
+  storageClassName: runtime-data
+  capacity: {storage: 1Gi}
+  accessModes: [ReadWriteOnce]
+  persistentVolumeReclaimPolicy: Retain
+  claimRef: {namespace: monitoring, name: grafana}
+  hostPath: {path: /runtime.data/grafana, type: DirectoryOrCreate}
+  nodeAffinity:
+    required:
+      nodeSelectorTerms:
+        - matchExpressions:
+            - {key: node-role.kubernetes.io/control-plane, operator: In, values: ["true"]}

@@ -19,7 +19,7 @@ grafana/dashboards/    always-on Grafana dashboards
 docs/                  these docs (markdown)
 profiles.toml          profiles: which components run
 runtime.profile/       generated view of the active profile
-runtime.data/          persistent data (postgres, registry, ...)
+runtime.data/          persistent data (postgres, nats, metrics, logs, traces, grafana, registry)
 ```
 
 ## The active profile: `runtime.profile/`

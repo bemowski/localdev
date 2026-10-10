@@ -163,9 +163,12 @@ The OpenTelemetry Operator (zero-code auto-instrumentation through a pod annotat
 - `runtime.data/postgres`: Postgres data. It's mounted into the server node at `/runtime.data`, and the pod uses it as a hostPath.
 - `runtime.data/nats`: JetStream data (streams, KV).
 - `runtime.data/tempo`: traces, kept for 72 hours.
+- `runtime.data/prometheus`: metrics, kept for 3 days (at most 5 GB).
+- `runtime.data/loki`: logs, kept for 72 hours.
+- `runtime.data/grafana`: Grafana's database: dashboards and settings made in the UI. The admin password is reset from the secret store on every start.
 - `runtime.data/registry`: images in the k3d registry, so `localhost:5005` keeps them across rebuilds.
 
-`mise run cluster:clean` deletes it all. It refuses to run while the cluster exists, shows sizes, and asks you to type `clean`. Pass `--yes` to skip the prompt. The files are owned by container users (root, and postgres uid 999), so it deletes them through a throwaway container rather than `sudo`.
+`mise run cluster:clean` deletes it all. It refuses to run while the cluster exists, shows sizes, and asks you to type `clean`. Pass `--yes` to skip the prompt. The files are owned by container users (root, postgres uid 999, and the monitoring stack's users), so it deletes them through a throwaway container rather than `sudo`.
 
 ## Postgres
 
