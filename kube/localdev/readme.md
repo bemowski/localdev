@@ -50,8 +50,8 @@ mise run cluster:clean                      # delete runtime.data (asks first; c
 mise run build <component>                  # rebuild a component's image (cnav, docs), push to the local registry, restart it
 mise run pg:psql                            # psql shell in the postgres pod
 mise run kn:forward                         # Knative internal gateway on localhost:8081 (call with a Host header)
-mise run keycloak:apply                     # apply keycloak/realms/*.json to Keycloak (idempotent)
-mise run keycloak:export [realm]            # Keycloak UI changes -> keycloak/realms/<realm>.json
+mise run keycloak:apply                     # apply components/keycloak/realms/*.json to Keycloak (idempotent)
+mise run keycloak:export [realm]            # Keycloak UI changes -> components/keycloak/realms/<realm>.json
 
 # grafana dashboards
 mise run grafana:list                       # dashboards in Grafana
@@ -207,7 +207,7 @@ To expose one later, add a wildcard `*.knative.localhost` route to Kourier and r
 - Create a Broker in a namespace, then Triggers that filter on CloudEvent attributes (`type`, `source`, and so on) and deliver to a Knative Service or any addressable.
 - Producers POST CloudEvents to `http://broker-ingress.knative-eventing.svc.cluster.local/<ns>/<broker>`.
 
-**Examples** (`examples/knative/`, not auto-applied):
+**Examples** (`components/knative/examples/`, not auto-applied):
 - `hello.yaml` is a Knative Service.
 - `eventing.yaml` is a Broker, an `event-display` consumer and a Trigger. Its header has a curl command for sending a test event.
 
@@ -242,7 +242,7 @@ Keycloak 26 runs in namespace `keycloak` (`components/keycloak/manifests/30-6-ke
   OIDC_DISCOVERY_URL: http://keycloak.keycloak.svc:8080/keycloak/realms/localdev/.well-known/openid-configuration
   ```
 - **The `/keycloak/realms/*` paths are public** (no localdev SSO): app login pages, token, discovery and JWKS work for any client, including curl.
-- **Realms are code:** `keycloak/realms/<realm>.json`.
+- **Realms are code:** `components/keycloak/realms/<realm>.json`.
   - `mise run keycloak:apply` applies them with keycloak-config-cli. It's idempotent and runs during `cluster:create`.
   - `mise run keycloak:export [realm]` writes realm changes made in the admin UI back to the file. The export is **trimmed** to your clients, roles, groups and common realm settings, so files stay readable. Users and client secrets are kept from the file, because Keycloak never exports them.
 - **The starter realm `localdev`** has **dev-only credentials**:

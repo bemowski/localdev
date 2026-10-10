@@ -240,14 +240,14 @@ kubectl -n knative-serving port-forward svc/kourier-internal "${usage_port}:80"
 description = "Validate grafana/dashboards: JSON parses, uids unique (a duplicate freezes provisioning)"
 run = "python3 grafana/dashtool.py check"
 
-# --- keycloak (IdP for apps; realms as code in keycloak/realms/*.json) -------------------
+# --- keycloak (IdP for apps; realms as code in components/keycloak/realms/*.json) -------
 
 [tasks."keycloak:apply"]
-description = "Apply keycloak/realms/*.json to Keycloak (keycloak-config-cli Job; idempotent)"
+description = "Apply components/keycloak/realms/*.json to Keycloak (keycloak-config-cli Job; idempotent)"
 run = """#!/bin/bash
 set -euo pipefail
 kubectl create namespace keycloak --dry-run=client -o yaml | kubectl apply -f - >/dev/null
-kubectl -n keycloak create configmap keycloak-realms --from-file=keycloak/realms/ \
+kubectl -n keycloak create configmap keycloak-realms --from-file=components/keycloak/realms/ \
     --dry-run=client -o yaml | kubectl apply -f - >/dev/null
 echo "Waiting for Keycloak..."
 # after a profile switch k3s may not have created it yet (and it waits for postgres)
@@ -289,7 +289,7 @@ fi
 """
 
 [tasks."keycloak:export"]
-description = "Save a realm configured in the Keycloak UI back to keycloak/realms/<realm>.json"
+description = "Save a realm configured in the Keycloak UI back to components/keycloak/realms/<realm>.json"
 usage = 'arg "[realm]" default="localdev"'
 run = """#!/bin/bash
 set -euo pipefail
@@ -297,7 +297,7 @@ set -a; source secrets.env; set +a
 kubectl -n keycloak port-forward svc/keycloak 18180:8080 >/dev/null 2>&1 & pf=$!
 trap 'kill $pf' EXIT
 until curl -sf -o /dev/null http://localhost:18180/keycloak/realms/master; do sleep 0.5; done
-KEYCLOAK_URL=http://localhost:18180/keycloak python3 keycloak/realmtool.py export "$usage_realm"
+KEYCLOAK_URL=http://localhost:18180/keycloak python3 components/keycloak/realmtool.py export "$usage_realm"
 """
 
 # --- profiles (profiles.toml + profile.py; active view in runtime.profile/) ------------------

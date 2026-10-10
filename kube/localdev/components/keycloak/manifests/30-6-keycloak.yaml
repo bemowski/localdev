@@ -5,7 +5,7 @@
 #   issuer:         http://localhost/keycloak/realms/<realm> (public: login pages, token, discovery)
 #   in-cluster:     http://keycloak.keycloak.svc:8080/keycloak  (backchannel: token/JWKS from pods;
 #                   tokens keep the localhost issuer - KC_HOSTNAME_BACKCHANNEL_DYNAMIC)
-#   realms:         keycloak/realms/*.json, applied by `mise run keycloak:apply` (keycloak-config-cli)
+#   realms:         components/keycloak/realms/*.json, applied by `mise run keycloak:apply` (keycloak-config-cli)
 #
 # Data: database "keycloak" on pg/postgres (runtime.data), created by the init container.
 # Secret keycloak-admin comes from `mise run cluster:secrets`.

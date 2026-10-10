@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """Keycloak realm tooling for kube/localdev (driven by the keycloak:* mise tasks).
 
-keycloak/realms/<realm>.json is the source of truth, applied by `mise run keycloak:apply`
+components/keycloak/realms/<realm>.json is the source of truth, applied by `mise run keycloak:apply`
 (keycloak-config-cli). This tool goes the other way:
 
-  export <realm>   Keycloak (admin API partial-export) -> keycloak/realms/<realm>.json
+  export <realm>   Keycloak (admin API partial-export) -> components/keycloak/realms/<realm>.json
 
 The export is trimmed to what developers manage, so files stay readable and portable across
 Keycloak versions (a full export carries realm internals that keycloak-config-cli may not know):

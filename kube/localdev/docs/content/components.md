@@ -20,6 +20,8 @@ components/<name>/
   dashboards/    optional: Grafana dashboards, shown in Grafana's "tools" folder
   docker/        optional: application code + Dockerfile, built by `mise run build <name>`
   build.sh       optional: a custom image build, used instead of building docker/ directly
+  ...            anything else the component owns: examples, config-as-code, tooling
+                 (e.g. knative/examples/, keycloak/realms/ + realmtool.py)
 ```
 
 - **Images** are pushed to the local registry as `localhost:5005/<name>:latest`, and pulled in the cluster

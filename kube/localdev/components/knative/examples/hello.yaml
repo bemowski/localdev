@@ -1,5 +1,5 @@
 # A Knative Service: deploy a container, get a cluster-local URL, autoscaling incl. scale-to-zero.
-#   kubectl apply -f examples/knative/hello.yaml        (or: kn service create ...)
+#   kubectl apply -f components/knative/examples/hello.yaml        (or: kn service create ...)
 #   call it from any pod:  curl http://hello.demo.svc.cluster.local
 #   from your desktop:     mise run kn:forward      (then curl -H 'Host: hello.demo.svc.cluster.local' localhost:8081)
 apiVersion: serving.knative.dev/v1
