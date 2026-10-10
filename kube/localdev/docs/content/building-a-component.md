@@ -231,9 +231,120 @@ pgweb gets a bookmark for every database on the server automatically, within 30 
     `cluster:profile`), for setup that manifests express badly: schemas and migrations, a Keycloak
     realm, NATS streams. It must be idempotent, since it runs again on every install.
 
+## Grafana: datasources and dashboards
+
+### How a datasource gets into Grafana
+
+A component can add its own Grafana datasource without touching Grafana's config: it publishes a
+labelled Secret (or ConfigMap) and Grafana picks it up within seconds. Three pieces make that work:
+
+1. **Grafana file provisioning** (core Grafana): Grafana reads datasource definitions from YAML files
+   in `/etc/grafana/provisioning/datasources/`, and re-reads them when its reload API is called.
+   [Grafana docs: Provision Grafana](https://grafana.com/docs/grafana/latest/administration/provisioning/#data-sources).
+2. **A watcher sidecar** ([kiwigrid/k8s-sidecar](https://github.com/kiwigrid/k8s-sidecar)): the
+   `grafana-sc-datasources` container in the Grafana pod watches namespace **`monitoring`** for
+   ConfigMaps and Secrets labelled **`grafana_datasource: "1"`**, writes each one's data keys as files
+   into that folder, and calls Grafana's reload API.
+3. **The Grafana Helm chart** (part of kube-prometheus-stack, `manifests/20-infra/20-2-monitoring.yaml`)
+   adds and wires up the sidecar (its `sidecar.datasources.*` values; on by default).
+
+The object's lifetime is the datasource's lifetime: remove the component (`mise run cluster:profile`
+without it) and the Secret goes, and so does the datasource.
+
+### Example: a Postgres datasource for your database
+
+The credentials stay in the [secret store](secrets.md): an **ExternalSecret** in `monitoring`
+renders the provisioning file into a Secret with the label. This is what the usage component does
+(`kube/components/usage/server/manifests/50-2-0-usage-secrets.yaml`).
+
+```toml
+# your component's secrets.defaults.toml: a read-only login (dev value)
+[myapp-ro]
+username = "myapp_ro"
+password = "myapp_ro"
+```
+
+```yaml
+apiVersion: external-secrets.io/v1
+kind: ExternalSecret
+metadata:
+  name: myapp-grafana-datasource
+  namespace: monitoring                 # the only namespace the datasource sidecar watches
+spec:
+  refreshInterval: 1h
+  secretStoreRef: {kind: ClusterSecretStore, name: localdev}
+  target:
+    name: myapp-grafana-datasource
+    template:
+      engineVersion: v2
+      metadata:
+        labels: {grafana_datasource: "1"}   # what the sidecar looks for
+      data:
+        myapp-datasource.yaml: |            # file name in Grafana's provisioning folder: keep it unique
+          apiVersion: 1
+          datasources:
+            - name: MyApp
+              uid: myapp-pg                 # stable: dashboards refer to the datasource by uid
+              type: grafana-postgresql-datasource
+              url: postgres-rw.pg.svc:5432
+              user: {{ .username }}
+              jsonData: {database: myapp, sslmode: disable, postgresVersion: 1500}
+              secureJsonData: {password: "{{ .password }}"}
+  data:
+    - {secretKey: username, remoteRef: {key: myapp-ro, property: username}}
+    - {secretKey: password, remoteRef: {key: myapp-ro, property: password}}
+```
+
+The login must exist in Postgres: create it in your `create-db` init container (see
+[Databases](#databases-and-other-setup)) and give it read access, including to tables created later:
+
+```sql
+-- in database myapp, as the Postgres admin
+GRANT USAGE ON SCHEMA public TO myapp_ro;
+GRANT SELECT ON ALL TABLES IN SCHEMA public TO myapp_ro;
+ALTER DEFAULT PRIVILEGES FOR ROLE myapp IN SCHEMA public GRANT SELECT ON TABLES TO myapp_ro;
+```
+
+Nothing secret in the datasource (a JSON API with no auth, say)? A plain ConfigMap with the same
+label and the same `data:` key works too, no ExternalSecret needed.
+
+**Check it:** Grafana → Connections → Data sources shows **MyApp**; *Save & test* tries the login.
+If it's missing, the sidecar logs each file it writes:
+
+```bash
+kubectl -n monitoring logs deploy/grafana -c grafana-sc-datasources | grep myapp
+```
+
+**Gotchas:**
+
+- The Secret must be in `monitoring`; anywhere else it's ignored.
+- Every datasource needs a unique `uid` and `name`, and the file name (the `data:` key) must not
+  collide with another component's.
+- Grafana expands `$VAR` and `${VAR}` in provisioning files as environment variables: a password
+  containing `$` must be written `$$`.
+
+### Dashboards
+
+Put dashboard JSON in your component's `dashboards/` folder: they appear in Grafana's **tools**
+folder while the component is in the profile. Point panels at your datasource by its `uid`
+(`{"type": "grafana-postgresql-datasource", "uid": "myapp-pg"}`).
+
+Saving UI edits back to the file:
+
+- **In-repo component** (`components/<name>/`): `mise run grafana:export "<title>"` updates the file in place.
+- **External component** (`local.toml` path): its dashboards are *copied* into the cluster, and
+  `grafana:export` doesn't know your folder. It writes a new file under `kube/localdev/grafana/dashboards/`
+  instead, which duplicates the uid (and a duplicate uid stops Grafana applying any dashboard file).
+  Move that file over your component's copy right away, then `mise run cluster:profile <profile>`
+  to copy it in again.
+(The chart's dashboard sidecar also turns ConfigMaps labelled `grafana_dashboard: "1"`, in any
+namespace, into dashboards, but the `dashboards/` folder is the localdev way: plain files, exported
+from the UI.)
+
 ## Checklist
 
 1. `manifests/` with a namespace, Deployment (`app: <name>`, `localdev/component: <name>`), Service, `sso` Middleware, Ingress.
 2. `build.sh` (or `docker/`) producing `localdev-registry:5005/<name>:latest`.
 3. Registered: `local.toml` (external) or `profiles.toml` (in this repo); `python3 profile.py check`.
 4. `mise run cluster:profile <profile>`; the app is on `http://localhost/<name>/`.
+5. Optional: a Grafana datasource (ExternalSecret in `monitoring`) and `dashboards/`.
