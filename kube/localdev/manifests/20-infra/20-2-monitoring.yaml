@@ -52,6 +52,10 @@ spec:
         volumeName: grafana-data
         size: 1Gi
       deploymentStrategy: {type: Recreate}   # one pod at a time on grafana.db (sqlite)
+      # The chart's default image is <version>-distroless (no shell); the hook below needs sh, so use the
+      # regular image - still the chart's version, so it follows chart upgrades.
+      image:
+        tag: "{{ .Chart.AppVersion }}"
       # The admin password env only applies when grafana.db is first created; reset it on every start
       # so a changed localdev-admin password (Reloader restarts the pod) still takes effect.
       lifecycleHooks:
@@ -175,7 +179,7 @@ spec:
             command: ["sh", "-c", "chown -R 1000:2000 /prometheus"]
             securityContext: {runAsUser: 0, runAsNonRoot: false}
             volumeMounts:
-              - {name: prometheus-kps-prometheus-db, mountPath: /prometheus}
+              - {name: prometheus-kps-prometheus-db, mountPath: /prometheus, subPath: prometheus-db}   # the operator's subPath
         # OpenTelemetry: Alloy pushes app metrics via OTLP (/prometheus/api/v1/otlp), Tempo's
         # metrics generator pushes span metrics + service graph via remote write
         enableOTLPReceiver: true
@@ -243,8 +247,17 @@ spec:
                 port:
                   number: 9093
 ---
-# runtime.data PVs: hostPath on the server node, bound to their claim by name (volumeName).
-# Class runtime-data has no provisioner, so k3s's local-path leaves these claims alone.
+# runtime.data PVs: hostPath on the server node, pre-bound to their claim (claimRef / volumeName).
+# Class runtime-data has no provisioner, so k3s's local-path leaves these claims alone; the
+# StorageClass object exists because the Prometheus operator refuses an unknown class.
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: runtime-data
+provisioner: kubernetes.io/no-provisioner
+reclaimPolicy: Retain
+volumeBindingMode: WaitForFirstConsumer
+---
 apiVersion: v1
 kind: PersistentVolume
 metadata:
