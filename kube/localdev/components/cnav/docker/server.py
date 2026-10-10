@@ -273,6 +273,41 @@ def evaluate_item(kube, item):
     }
 
 
+COMPONENT_LABEL = "localdev/component"     # on a workload: show it under this component's row
+GROUP_LABEL = "localdev/status-group"      # optional: the group for that row (default: apps)
+
+
+def add_discovered(kube, config):
+    """Add a status item per component whose workloads are labelled localdev/component=<c>, so a
+    component (including an external one) shows up without editing status.yaml. Its checks are all
+    its labelled workloads. Components named by a `tool:` in status.yaml, and workloads it already
+    checks, are left to status.yaml."""
+    tools = {i.get("tool") for g in config for i in g.get("items", [])}
+    checked = {(c.get("kind"), c.get("namespace"), c.get("name"))
+               for g in config for i in g.get("items", []) for c in i.get("checks", [])}
+    found = {}   # (group, component) -> checks
+    for kind, (_, plural) in WORKLOADS.items():
+        try:
+            objs = (kube.get(f"/apis/apps/v1/{plural}", labelSelector=COMPONENT_LABEL) or {}).get("items", [])
+        except Exception as e:  # discovery is extra: never sink the page
+            log.warning("discovering labelled %s failed: %s", plural, e)
+            continue
+        for o in objs:
+            meta = o["metadata"]
+            comp = meta["labels"][COMPONENT_LABEL]
+            if comp in tools or (kind, meta["namespace"], meta["name"]) in checked:
+                continue
+            group = meta["labels"].get(GROUP_LABEL, "apps")
+            found.setdefault((group, comp), []).append({"kind": kind, "namespace": meta["namespace"],
+                                                        "name": meta["name"]})
+    for (group, comp), checks in sorted(found.items()):
+        g = next((g for g in config if g.get("group") == group), None)
+        if g is None:
+            g = {"group": group, "items": []}
+            config.append(g)
+        g["items"].append({"name": comp, "checks": sorted(checks, key=lambda c: (c["namespace"], c["name"]))})
+
+
 def node_memory(kube):
     """(working-set bytes, allocatable bytes) summed over nodes; (None, None) if unavailable.
     Unlike the pod sums, this includes k3s itself, containerd, kernel and active file cache."""
@@ -307,10 +342,11 @@ def log_transitions(groups):
 
 def status():
     config = yaml.safe_load((CONFIG_DIR / "status.yaml").read_text()) or []
+    kube = Kube()
+    add_discovered(kube, config)
     for g in config:
         g["items"] = for_profile(g.get("items", []))
     config = [g for g in config if g["items"]]
-    kube = Kube()
     groups = []
     for g in config:
         items = [evaluate_item(kube, i) for i in g.get("items", [])]

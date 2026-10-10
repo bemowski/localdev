@@ -68,7 +68,9 @@ kind: Deployment
 metadata:
   name: myapp
   namespace: myapp
-  labels: {app: myapp}             # `mise run build myapp` restarts deployments with this label
+  # app: `mise run build myapp` restarts deployments with this label
+  # localdev/component: cnav's status column shows it (see below)
+  labels: {app: myapp, localdev/component: myapp}
 spec:
   selector:
     matchLabels: {app: myapp}
@@ -188,6 +190,14 @@ For a UI and a few APIs, one component can hold them all: one manifest per servi
 and a `build.sh` that builds and pushes each image as `$REGISTRY/<name>-<service>:latest`. Label
 every deployment `localdev/component: <name>` so `mise run build <name>` restarts them all.
 
+### In cnav's status column
+
+Label each workload (Deployment, StatefulSet, DaemonSet) `localdev/component: <name>`. cnav shows one
+row per component, with all its labelled workloads as checks, in the `apps` group. Add
+`localdev/status-group: <group>` to put the row in another group. Nothing to register: the row comes
+and goes with the workloads. (`status.yaml` in cnav's ConfigMap still lists the built-in tools; a
+component named by a `tool:` there isn't shown twice.)
+
 ## Secrets
 
 Don't put secret values in the manifest: declare an **ExternalSecret** against the `localdev` store
@@ -214,6 +224,8 @@ idempotently, as the Keycloak component does (`components/keycloak/manifests/30-
           command: [sh, -c, 'until pg_isready -q; do sleep 2; done; psql -c "CREATE SCHEMA IF NOT EXISTS myapp"']
 ```
 
+pgweb gets a bookmark for every database on the server automatically, within 30 seconds.
+
 !!! note "Planned: `deploy.sh`"
     A component's `deploy.sh` will run after the component is installed (by `cluster:create` and
     `cluster:profile`), for setup that manifests express badly: schemas and migrations, a Keycloak
@@ -221,7 +233,7 @@ idempotently, as the Keycloak component does (`components/keycloak/manifests/30-
 
 ## Checklist
 
-1. `manifests/` with a namespace, Deployment (`app: <name>`), Service, `sso` Middleware, Ingress.
+1. `manifests/` with a namespace, Deployment (`app: <name>`, `localdev/component: <name>`), Service, `sso` Middleware, Ingress.
 2. `build.sh` (or `docker/`) producing `localdev-registry:5005/<name>:latest`.
 3. Registered: `local.toml` (external) or `profiles.toml` (in this repo); `python3 profile.py check`.
 4. `mise run cluster:profile <profile>`; the app is on `http://localhost/<name>/`.
