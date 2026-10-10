@@ -3,3 +3,5 @@ secrets.env
 secrets
 runtime.data/
 runtime.profile/
+local.toml
+.mise.local.toml

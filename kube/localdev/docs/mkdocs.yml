@@ -7,9 +7,12 @@ docs_dir: content
 
 nav:
   - Home: index.md
+  - Concepts: concepts.md
   - Getting started: getting-started.md
+  - Moving from Docker Compose: from-docker-compose.md
   - Cluster layout: cluster-layout.md
   - Components: components.md
+  - Building a component: building-a-component.md
 
 theme:
   name: material
@@ -34,9 +37,12 @@ theme:
 markdown_extensions:
   - admonition
   - attr_list
+  - def_list
   - tables
   - toc:
       permalink: true
   - pymdownx.highlight
   - pymdownx.inlinehilite
   - pymdownx.superfences
+  - pymdownx.tabbed:
+      alternate_style: true

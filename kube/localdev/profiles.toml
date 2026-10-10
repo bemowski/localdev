@@ -4,6 +4,8 @@
 #   components/<name>/docker/       image built by `mise run build <name>` (optional)
 #   components/<name>/build.sh      custom image build, used instead of docker/ (optional)
 # platform, infra and apps (manifests/, grafana/dashboards/) are always deployed.
+# local.toml (gitignored, same format) adds your own profiles, a `default`, and EXTERNAL components
+# living in other projects: [components.myapp] path = "../../../myapp/localdev" (see the docs).
 #
 #   mise run cluster:create [profile]   create with a profile (default below, or the last one used)
 #   mise run cluster:profile            list profiles

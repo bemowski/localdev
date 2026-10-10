@@ -23,6 +23,14 @@ set -euo pipefail
 
 mise run cluster:secrets:check
 
+# workspace: a host dir mounted into the node at the same path, so external components
+# (local.toml) under it can be linked (live edits). Default: the dir holding this git repo, i.e. its
+# sibling projects; override with LOCALDEV_WORKSPACE (e.g. in a gitignored .mise.local.toml).
+ws="${LOCALDEV_WORKSPACE:-$(dirname "$(git -C "{{config_root}}" rev-parse --show-toplevel)")}"
+ws="$(realpath "$ws")"
+mkdir -p runtime.profile && echo "$ws" > runtime.profile/workspace
+echo "workspace (mounted read-only): $ws"
+
 # the active view k3s and Grafana read: runtime.profile/ (links into manifests/, components/)
 python3 profile.py link ${usage_profile:-}
 
@@ -30,7 +38,8 @@ python3 profile.py link ${usage_profile:-}
 mkdir -p runtime.data/registry
 
 k3d cluster create --config k3d.yaml \
-    --volume "{{config_root}}/runtime.profile/manifests:/var/lib/rancher/k3s/server/manifests/localdev@server:0"
+    --volume "{{config_root}}/runtime.profile/manifests:/var/lib/rancher/k3s/server/manifests/localdev@server:0" \
+    --volume "$ws:$ws:ro@server:0"
 
 k3d kubeconfig get "$CLUSTER_NAME" > "$KUBECONFIG"
 chmod 600 "$KUBECONFIG"
@@ -42,7 +51,7 @@ echo "Waiting for traefik..."
 until kubectl -n kube-system get deploy traefik >/dev/null 2>&1; do sleep 2; done
 kubectl -n kube-system rollout status deploy/traefik --timeout=180s
 
-for c in $(python3 profile.py buildable); do mise run build "$c"; done   # components/<c>/docker
+for c in $(python3 profile.py buildable); do mise run build "$c"; done   # build.sh or docker/
 
 if python3 profile.py enabled keycloak; then mise run keycloak:apply; fi
 echo "cluster ready - profile $(python3 profile.py current): $(tr '\n' ' ' < runtime.profile/components)"
@@ -97,28 +106,34 @@ kubectl -n auth rollout restart deploy/oauth2-proxy >/dev/null 2>&1 && echo "  r
 """
 
 [tasks.build]
-description = "Build a component's image (its build.sh, else components/<component>/docker), push it, restart its deployment"
-usage = 'arg "<component>" help="component with a build.sh or a docker/ folder"'
+description = "Build a component's image (its build.sh, else its docker/), push it, restart its deployments"
+usage = 'arg "<component>" help="component with a build.sh or a docker/ folder (in-repo or local.toml)"'
 run = """#!/bin/bash
 set -euo pipefail
 app="$usage_component"
-image="localhost:5005/$app:latest"       # pulled in-cluster as localdev-registry:5005/$app
+dir="$(python3 profile.py dir "$app")"   # components/<c>, or an external component's folder
+registry="localhost:5005"                # pulled in-cluster as localdev-registry:5005/...
+image="$registry/$app:latest"
 
-if [ -x "components/$app/build.sh" ]; then
-    # the component builds itself (e.g. stages files from outside its folder): must build $IMAGE
-    IMAGE="$image" LOCALDEV_ROOT="{{config_root}}" "components/$app/build.sh"
-elif [ -d "components/$app/docker" ]; then
-    docker build -t "$image" "components/$app/docker"
+if [ -x "$dir/build.sh" ]; then
+    # the component builds itself (external build, files from elsewhere, several images, ...).
+    # Contract: run from its folder; build $IMAGE, and/or build + push more images to $REGISTRY.
+    (cd "$dir" && IMAGE="$image" REGISTRY="$registry" COMPONENT_DIR="$dir" LOCALDEV_ROOT="{{config_root}}" ./build.sh)
+elif [ -d "$dir/docker" ]; then
+    docker build -t "$image" "$dir/docker"
 else
-    echo "ERROR: components/$app has neither build.sh nor docker/" >&2; exit 1
+    echo "ERROR: $dir has neither build.sh nor docker/" >&2; exit 1
 fi
-docker push "$image"
+if docker image inspect "$image" >/dev/null 2>&1; then docker push "$image"; fi
 
-# restart any deployment labelled app=<app> so it pulls the new :latest
-kubectl get deploy -A -l app="$app" -o jsonpath='{range .items[*]}{.metadata.namespace}{"\\n"}{end}' |
-while read -r ns; do
-    kubectl -n "$ns" rollout restart deploy -l app="$app"
-    kubectl -n "$ns" rollout status deploy -l app="$app" --timeout=120s
+# restart deployments labelled app=<c>, or localdev/component=<c> (a family of services), so they
+# pull the new :latest
+for sel in "app=$app" "localdev/component=$app,app!=$app"; do
+    kubectl get deploy -A -l "$sel" -o jsonpath='{range .items[*]}{.metadata.namespace}{"\\n"}{end}' | sort -u |
+    while read -r ns; do
+        kubectl -n "$ns" rollout restart deploy -l "$sel"
+        kubectl -n "$ns" rollout status deploy -l "$sel" --timeout=120s
+    done
 done
 """
 
@@ -138,6 +153,8 @@ run = ["mise run cluster:destroy", "mise run cluster:create ${usage_profile:-}"]
 description = "Show profile, cluster, nodes, helm install jobs and ingresses"
 run = """#!/bin/bash
 echo "profile: $(python3 profile.py current)  components: $(tr '\n' ' ' < runtime.profile/components 2>/dev/null)"
+echo "workspace: $(python3 profile.py workspace || true)"
+python3 profile.py list | sed -n '/external components/,$p'
 k3d cluster list
 kubectl get nodes -o wide
 kubectl get helmcharts -A
@@ -330,10 +347,10 @@ done <<< "$removed"
 # k3s skips a file whose path+mtime it has seen before - even if we deleted its objects since -
 # so give re-added components' manifests a fresh mtime (content and git are unaffected)
 missing=$(python3 profile.py missing $(kubectl -n kube-system get addon -o jsonpath='{.items[*].metadata.name}'))
-if [ -n "$missing" ]; then touch $missing; fi
-# newly enabled components with a docker/ folder: build their image (until then they ImagePullBackOff)
+if [ -n "$missing" ]; then cut -f2 <<< "$missing" | xargs -d '\n' touch; fi
+# newly enabled components with an image (build.sh or docker/): build it (until then ImagePullBackOff)
 for c in $(python3 profile.py buildable); do
-    if grep -q "/components/$c/manifests/" <<< "$missing"; then mise run build "$c"; fi
+    if cut -f1 <<< "$missing" | grep -qx "$c"; then mise run build "$c"; fi
 done
 mise run cluster:profile:sync
 if python3 profile.py enabled keycloak; then mise run cluster:secrets >/dev/null; mise run keycloak:apply; fi

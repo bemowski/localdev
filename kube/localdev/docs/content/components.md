@@ -1,7 +1,8 @@
 # Components
 
 A component is an optional, self-contained piece of the cluster: everything it needs lives in
-`components/<name>/`. Profiles (`profiles.toml`) choose which components run.
+one folder, `components/<name>/` in this repo, or a folder in your own project registered in your
+`local.toml` (see [Building a component](building-a-component.md)). Profiles choose which components run.
 
 | component | what | in profiles |
 |---|---|---|
@@ -26,9 +27,10 @@ components/<name>/
 
 - **Images** are pushed to the local registry as `localhost:5005/<name>:latest`, and pulled in the cluster
   as `localdev-registry:5005/<name>:latest`. After a build, deployments labelled `app=<name>` restart.
-- **`build.sh`** is called with `IMAGE` and `LOCALDEV_ROOT` set and must build `$IMAGE`. The docs component
-  uses it to copy the top-level `docs/` folder into a staged build context; its multi-stage Dockerfile then
-  renders the markdown with MkDocs and serves the result with nginx.
+- **`build.sh`** runs from the component's folder with `IMAGE`, `REGISTRY`, `COMPONENT_DIR` and
+  `LOCALDEV_ROOT` set, and must build `$IMAGE` (see [the build hook](building-a-component.md#the-build-hook)).
+  The docs component uses it to copy the top-level `docs/` folder into a staged build context; its
+  multi-stage Dockerfile then renders the markdown with MkDocs and serves the result with nginx.
 - `cluster:create` builds every enabled component that has an image; `cluster:profile` builds the ones it adds.
 
 ## Metadata (`profiles.toml`)
@@ -38,12 +40,11 @@ Optional, under `[components.<name>]`:
 - `requires = [...]`: other components it needs, added automatically (keycloak requires postgres).
 - `layer = "..."`: where its manifests deploy: `platform`, `infra`, `tools` (default) or `apps`.
 - `always = true`: part of every profile (cnav).
+- `path = "..."`: only in `local.toml`, for an external component's folder.
 
 ## Adding a component
 
-1. Create `components/<name>/manifests/30-<n>-<name>.yaml` with its own namespace, workloads, and, for a
-   UI, a Service, an `sso` Middleware and an Ingress on `/<name>`.
-2. Optionally add `docker/` (and `build.sh`) for an image, and `dashboards/`.
-3. Add it to the profiles you want in `profiles.toml`, then `mise run cluster:profile <profile>`.
-4. Optionally add a card and a status row (tagged `tool: <name>`) to cnav's ConfigMap, in
-   `components/cnav/manifests/20-7-cnav.yaml`; they hide themselves when the component isn't installed.
+See [Building a component](building-a-component.md): the folder, a manifest template, build hook
+recipes (Maven, Gradle, Go, a Dockerfile elsewhere), and registering it from your own project.
+To show it in cnav, add a card and a status row tagged `tool: <name>` to cnav's ConfigMap
+(`components/cnav/manifests/20-7-cnav.yaml`); they hide themselves when the component isn't installed.

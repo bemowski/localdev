@@ -51,6 +51,8 @@ Dropped tools are uninstalled; their data in `runtime.data/` is kept, so switchi
 
 The **Ports** card in the navigator shows these live.
 
+Coming from docker compose? See [Moving from Docker Compose](from-docker-compose.md).
+
 ## Everyday commands
 
 ```bash

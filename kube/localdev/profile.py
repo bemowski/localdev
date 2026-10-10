@@ -1,11 +1,14 @@
 #!/usr/bin/env python3
 """Cluster profiles for kube/localdev (driven by the cluster:* mise tasks).
 
-profiles.toml names which optional components (components/<name>/) a cluster runs. This tool
-builds runtime.profile/, the "active view" the cluster reads - links only, no copies, so edits to
-the real files stay live:
+profiles.toml names which optional components (components/<name>/) a cluster runs. local.toml
+(gitignored, same format) adds a developer's own profiles and EXTERNAL components - folders in other
+projects: [components.<name>] path = "../../../myapp/localdev". This tool builds runtime.profile/, the
+"active view" the cluster reads - links, so edits to the real files stay live:
 
   runtime.profile/name          current profile
+  runtime.profile/workspace     host dir mounted into the node at the same path (cluster:create);
+                                external components under it are linked, others are COPIED
   runtime.profile/components    enabled components, one per line (-> cnav ConfigMap)
   runtime.profile/manifests/    mounted as k3s's manifests dir: a real folder per layer
                                 (10-platform, 20-infra, 30-tools, 50-apps) holding DIRECTORY links -
@@ -22,10 +25,14 @@ the real files stay live:
   enabled <component>   exit 0 if enabled in the current profile
   removed <to> [addons] manifest files to delete to reach <to>: components still deployed
                         (their AddOns exist) but not in <to>; dependents first, files reversed
-  missing [addons]      manifest files of enabled components not yet deployed (to touch)
+  missing [addons]      "<component>\t<file>" per manifest of an enabled component not yet deployed
+                        (to touch: k3s skips a path+mtime it has seen)
   buildable             enabled components with an image to build (build.sh or docker/)
+  dir <component>       the component's folder (components/<c>, or its local.toml path)
+  workspace             the workspace mounted into the cluster (empty if none)
   check                 validate profiles.toml and components/
 """
+import functools
 import os
 import shutil
 import sys
@@ -34,6 +41,7 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 CONFIG = HERE / "profiles.toml"
+LOCAL = HERE / "local.toml"            # per developer, gitignored: own profiles, external components
 COMPONENTS = HERE / "components"
 VIEW = HERE / "runtime.profile"
 # layer -> folder in runtime.profile/manifests/ (sorted = deploy order). manifests/<folder>/ holds the
@@ -46,12 +54,50 @@ def die(msg):
     sys.exit(f"profile: {msg}")
 
 
+@functools.cache
 def config():
-    return tomllib.loads(CONFIG.read_text())
+    """profiles.toml, with local.toml merged over it (per profile / per component; `default`)."""
+    cfg = tomllib.loads(CONFIG.read_text())
+    if LOCAL.exists():
+        local = tomllib.loads(LOCAL.read_text())
+        if "default" in local:
+            cfg["default"] = local["default"]
+        for table in ("profiles", "components"):
+            for key, value in local.get(table, {}).items():
+                cfg.setdefault(table, {})[key] = {**cfg.get(table, {}).get(key, {}), **value}
+    return cfg
+
+
+def external_path(c):
+    """The folder of an external component (local.toml `path`), or None."""
+    p = config().get("components", {}).get(c, {}).get("path")
+    if not p:
+        return None
+    p = Path(os.path.expanduser(p))
+    return (p if p.is_absolute() else HERE / p).resolve()
+
+
+def component_dir(c):
+    return external_path(c) or COMPONENTS / c
 
 
 def components_on_disk():
-    return sorted(p.name for p in COMPONENTS.iterdir() if (p / "manifests").is_dir())
+    names = {p.name for p in COMPONENTS.iterdir() if (p / "manifests").is_dir()}
+    names |= {c for c in config().get("components", {}) if external_path(c) and (external_path(c) / "manifests").is_dir()}
+    return sorted(names)
+
+
+def workspace():
+    """The host dir cluster:create mounted into the node at the same path (None: no mount)."""
+    f = VIEW / "workspace"
+    return Path(f.read_text().strip()) if f.exists() and f.read_text().strip() else None
+
+
+def linkable(c):
+    """True if the cluster can follow a link to the component's folder: inside this repo (always
+    mounted) or inside the mounted workspace. Otherwise its manifests are copied."""
+    d, ws = component_dir(c), workspace()
+    return d.is_relative_to(HERE) or bool(ws and d.is_relative_to(ws))
 
 
 def meta(cfg, c):
@@ -90,7 +136,14 @@ def current():
 
 
 def manifest_files(component):
-    return sorted((COMPONENTS / component / "manifests").glob("*.y*ml"))
+    return sorted((component_dir(component) / "manifests").glob("*.y*ml"))
+
+
+def deployed_file(cfg, c, f):
+    """Where k3s sees manifest f of component c: the source via a dir link, or its copy."""
+    if linkable(c):
+        return f
+    return VIEW / "manifests" / LAYERS[meta(cfg, c).get("layer", "tools")] / c / f.name
 
 
 def link(name):
@@ -118,9 +171,16 @@ def link(name):
         (m / folder).mkdir()
         if (HERE / "manifests" / folder).is_dir():
             (m / folder / "core").symlink_to(HERE / "manifests" / folder, target_is_directory=True)
+    copied = []
     for c in comps:
         folder = LAYERS[meta(cfg, c).get("layer", "tools")]
-        (m / folder / c).symlink_to(COMPONENTS / c / "manifests", target_is_directory=True)
+        if linkable(c):
+            (m / folder / c).symlink_to(component_dir(c) / "manifests", target_is_directory=True)
+        else:   # outside every mount: copy (copy2 keeps mtimes, so unchanged files aren't re-applied)
+            (m / folder / c).mkdir()
+            for f in manifest_files(c):
+                shutil.copy2(f, m / folder / c / f.name)
+            copied.append(c)
     d = VIEW / "dashboards"
 
     def link_file(src, dst):
@@ -130,13 +190,20 @@ def link(name):
     for src in DASHBOARDS.rglob("*.json"):
         link_file(src, d / src.relative_to(DASHBOARDS))
     for c in comps:
-        for src in sorted((COMPONENTS / c / "dashboards").glob("*.json")):
-            link_file(src, d / "tools" / src.name)
+        for src in sorted((component_dir(c) / "dashboards").glob("*.json")):
+            if external_path(c):   # Grafana only sees this repo (/localdev): copy
+                (d / "tools").mkdir(parents=True, exist_ok=True)
+                shutil.copy2(src, d / "tools" / src.name)
+            else:
+                link_file(src, d / "tools" / src.name)
     (VIEW / "name").write_text(name + "\n")
     (VIEW / "components").write_text("".join(f"{c}\n" for c in comps))
     n_dash = sum(1 for _ in d.rglob("*.json"))
     print(f"  profile {name}: components [{', '.join(comps) or '-'}]; "
           f"{n_dash} dashboards -> {VIEW.relative_to(HERE)}/")
+    for c in copied:
+        print(f"  note: {c} ({component_dir(c)}) is outside the mounted workspace ({workspace() or 'none'}):"
+              f" its manifests are COPIED - after editing them, re-run `mise run cluster:profile`")
 
 
 def cmd_list(_):
@@ -148,6 +215,11 @@ def cmd_list(_):
         mark = "*" if name == cur else " "
         dflt = " (default)" if name == cfg.get("default") else ""
         print(f" {mark} {name:9} {p.get('description', '')}{dflt}\n             [{', '.join(comps) or 'no tools'}]")
+    external = [c for c in components_on_disk() if external_path(c)]
+    if external:
+        print("   external components (local.toml):")
+        for c in external:
+            print(f"     {c:12} {component_dir(c)}  ({'linked' if linkable(c) else 'copied: outside the workspace'})")
 
 
 def cmd_removed(args):
@@ -179,10 +251,11 @@ def cmd_missing(args):
     so a component removed and re-added in the same k3s process needs a fresh mtime (touch)."""
     deployed = set(args)
     comps = (VIEW / "components").read_text().split() if (VIEW / "components").exists() else []
+    cfg = config()
     for c in comps:
         for f in manifest_files(c):
             if f.stem not in deployed:
-                print(f)
+                print(f"{c}\t{deployed_file(cfg, c, f)}")
 
 
 def cmd_check(_):
@@ -192,8 +265,15 @@ def cmd_check(_):
             problems.append(f"[components.{c}] layer '{m['layer']}' is not one of {', '.join(LAYERS)}")
     if cfg.get("default") not in cfg.get("profiles", {}):
         problems.append(f"default profile '{cfg.get('default')}' is not defined")
-    for c in cfg.get("components", {}):
-        if c not in components_on_disk():
+    for c, m in cfg.get("components", {}).items():
+        if m.get("path"):
+            if (COMPONENTS / c).exists():
+                problems.append(f"local.toml component '{c}' clashes with components/{c}/ (pick another name)")
+            elif not (external_path(c) / "manifests").is_dir():
+                problems.append(f"[components.{c}] path {external_path(c)} has no manifests/ folder")
+            elif not linkable(c):
+                print(f"  note: {c} is outside the mounted workspace ({workspace() or 'none'}): manifests are copied")
+        elif c not in components_on_disk():
             problems.append(f"[components.{c}] has no components/{c}/manifests/")
     for name in cfg.get("profiles", {}):
         try:
@@ -203,8 +283,8 @@ def cmd_check(_):
     for c in components_on_disk():
         if not manifest_files(c):
             problems.append(f"components/{c}/manifests/ has no .yaml files")
-        if any((COMPONENTS / c / "manifests").glob("*.json")):
-            problems.append(f"components/{c}/manifests/ contains .json (k3s would apply it; dashboards go in dashboards/)")
+        if any((component_dir(c) / "manifests").glob("*.json")):
+            problems.append(f"{component_dir(c)}/manifests/ contains .json (k3s would apply it; dashboards go in dashboards/)")
     for msg in problems:
         print(f"  {msg}")
     if problems:
@@ -230,7 +310,13 @@ def main():
     elif cmd == "buildable":
         comps = (VIEW / "components").read_text().split() if (VIEW / "components").exists() else []
         print("\n".join(c for c in comps
-                        if (COMPONENTS / c / "build.sh").is_file() or (COMPONENTS / c / "docker").is_dir()))
+                        if (component_dir(c) / "build.sh").is_file() or (component_dir(c) / "docker").is_dir()))
+    elif cmd == "dir":
+        if not args or args[0] not in components_on_disk():
+            die(f"no component '{args[0] if args else ''}' (have: {', '.join(components_on_disk())})")
+        print(component_dir(args[0]))
+    elif cmd == "workspace":
+        print(workspace() or "")
     elif cmd == "missing":
         cmd_missing(args)
     elif cmd == "check":

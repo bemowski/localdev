@@ -2,7 +2,7 @@
 
 Ephemeral local Kubernetes (k3d) with path-based routing on `http://localhost/<app>`, behind Google SSO.
 
-**Docs:** [http://localhost/docs/](http://localhost/docs/) when the cluster runs (source: [`docs/content/`](docs/content/)): getting started, cluster layout, profiles and components, manifest rules. This readme keeps the setup and reference details.
+**Docs:** [http://localhost/docs/](http://localhost/docs/) when the cluster runs (source: [`docs/content/`](docs/content/)): concepts, getting started, moving from docker compose, cluster layout, components, and building your own component (including from another project, via a gitignored `local.toml`). This readme keeps the setup and reference details.
 
 | path | app |
 |---|---|
@@ -23,7 +23,7 @@ Ephemeral local Kubernetes (k3d) with path-based routing on `http://localhost/<a
 ## Prerequisites
 
 - **Docker.** On Linux, your user must be in the `docker` group. On WSL2, use Docker Desktop with WSL integration or native Docker inside WSL. On macOS, use Docker Desktop, OrbStack or Colima.
-- **Free host ports:** 80 (ingress) and 5005 (local registry `localdev-registry`). Check with `ss -ltn`. On Linux, binding port 80 works because Docker does it as root.
+- **Free host ports:** 80 (ingress), 5005 (local registry `localdev-registry`), and 5432 / 4222 on 127.0.0.1 (Postgres / NATS). Check with `ss -ltn`. On Linux, binding port 80 works because Docker does it as root.
 - **About 4 GB of RAM free for Docker.**
 - **Linux: raise the inotify limits.** Every k3d node shares the host kernel, and following container logs (Alloy → Loki) uses one inotify instance per stream. The default of 128 runs out, and pods then log `failed to create fsnotify watcher: too many open files` instead of their real output. Raise it once:
   ```bash
@@ -260,7 +260,7 @@ Keycloak 26 runs in namespace `keycloak` (`components/keycloak/manifests/30-6-ke
 
 ## Images (`components/<name>/docker/`, `build.sh`)
 
-A component's optional `docker/` folder holds application code and its Dockerfile. `mise run build <name>` builds it as `localhost:5005/<name>:latest`, pushes it to the k3d registry and restarts any deployment labelled `app=<name>`. Inside the cluster, the image is pulled as `localdev-registry:5005/<name>:latest`. If the component has an executable `build.sh`, the task runs that instead of building `docker/` (with `IMAGE` and `LOCALDEV_ROOT` set; it must build `$IMAGE`). `mise run cluster:create` builds every enabled component that has an image, and `cluster:profile` builds those it adds.
+A component's optional `docker/` folder holds application code and its Dockerfile. `mise run build <name>` builds it as `localhost:5005/<name>:latest`, pushes it to the k3d registry and restarts any deployment labelled `app=<name>`. Inside the cluster, the image is pulled as `localdev-registry:5005/<name>:latest`. If the component has an executable `build.sh`, the task runs that instead, from the component's folder, with `IMAGE`, `REGISTRY`, `COMPONENT_DIR` and `LOCALDEV_ROOT` set; it must build `$IMAGE` and/or push more images itself. Deployments labelled `app=<name>` or `localdev/component=<name>` are restarted. `mise run cluster:create` builds every enabled component that has an image, and `cluster:profile` builds those it adds.
 
 - **docs** (`components/docs`): `build.sh` copies its `docker/` files and the top-level `docs/` into a temporary build context. The multi-stage Dockerfile renders the markdown with MkDocs Material (`mkdocs build --strict`: broken links fail the build) and serves the site from nginx under `/docs/`. Edit `docs/content/*.md` (and `docs/mkdocs.yml` for the nav), then `mise run build docs`.
 - **cnav** (code in `components/cnav/docker/`, deployed by `components/cnav/manifests/20-7-cnav.yaml`): a small Python server (stdlib plus PyYAML) serving the navigator page.
