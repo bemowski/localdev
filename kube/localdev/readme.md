@@ -45,7 +45,6 @@ mise run cluster:clean                      # delete runtime.data (asks first; c
 
 # apps and tools
 mise run build cnav                         # rebuild components/cnav/docker, push to the local registry, restart it
-mise run pg:forward                         # postgres on localhost:5432 (pass a port to change it)
 mise run pg:psql                            # psql shell in the postgres pod
 mise run kn:forward                         # Knative internal gateway on localhost:8081 (call with a Host header)
 mise run keycloak:apply                     # apply keycloak/realms/*.json to Keycloak (idempotent)
@@ -220,7 +219,7 @@ The OpenTelemetry Operator (zero-code auto-instrumentation through a pod annotat
 Postgres 18 is a single-instance StatefulSet in namespace `pg` (`components/postgres/manifests/30-2-postgres.yaml`), with no operator.
 - **Credentials** (fixed, dev only): user `app`, password `localdev`, database `app`.
 - **In-cluster connection:** host `postgres-rw.pg.svc:5432`. The Secret `postgres-app` has the keys `username`, `password`, `dbname`, `host`, `port`, `uri` and `jdbc-uri`.
-- **From your desktop:** run `mise run pg:forward`, then connect to `postgresql://app:localdev@localhost:5432/app`.
+- **From your desktop:** `postgresql://app:localdev@localhost:5432/app`, always on while postgres is installed (Service `pg/postgres-local`, bound to 127.0.0.1).
 - **Web UI:** `/pgweb/`. Each app has its **own database** on this server (e.g. `app`, `keycloak`), not a schema in `app`.
   - pgweb runs with `--sessions`, so **every browser tab or window has its own connection**. pgweb's default is a single connection shared by everyone.
   - A new tab opens on the connect screen: choose a **Bookmark** (one per database), then click Connect. Within a tab, the database menu switches databases.
@@ -230,7 +229,7 @@ Postgres 18 is a single-instance StatefulSet in namespace `pg` (`components/post
 ## NATS
 
 NATS 2.15 runs as a single server with JetStream in namespace `nats` (`components/nats/manifests/30-3-nats.yaml`, official `nats` chart).
-- **Client URL:** `nats://nats.nats.svc:4222`, with no auth (local only).
+- **Client URL:** `nats://nats.nats.svc:4222` in the cluster, `nats://localhost:4222` from your desktop (Service `nats/nats-local`, bound to 127.0.0.1), with no auth.
 - **Monitoring endpoint:** `http://nats.nats.svc:8222` (`/varz`, `/connz`, `/subsz`, `/jsz`).
 - **Web UI:** NUI at `/nats/`. It's preloaded with a `localdev` connection from the `nui-contexts` ConfigMap. Open the connection, then use Messages to subscribe to a subject or wildcard (`demo.>`, `>`) and watch traffic live.
 - **CLI:** `kubectl -n nats exec -it deploy/nats-box -- nats sub '>'`, or `nats stream ls`, `nats pub demo.x hi`.
@@ -326,8 +325,9 @@ A component's optional `docker/` folder holds application code and its Dockerfil
     - The header shows **`pods`**, the sum for workloads listed in `status.yaml`, and **`node`**, the whole node(s), which is what Headlamp shows.
     - The node figure is roughly twice the pods figure because it also includes the `k3s server` process (API server, controllers, kubelet and the SQLite datastore, all outside any pod, about 1.5 GiB), containerd, kernel memory and active file cache.
   - **Below the cards**, two panels (about a quarter of the screen high):
-    - **Ports (left)** lists the host ports k3d exposes and what answers each one in the cluster, e.g. `localhost:80 → kube-system / traefik :80 → web`, with ready endpoints and a link to the Service in Headlamp. It reads `k3d.yaml`, mounted read-only from the node, and matches each port to a LoadBalancer or NodePort Service, plus the image registry on `localhost:5005`. To expose a tool (e.g. Postgres on 5432), add the mapping to `k3d.yaml` (`mise run cluster:recreate`) and a LoadBalancer Service on that port. A mapped port with nothing behind it shows grey.
+    - **Ports (left)** lists the host ports k3d exposes and what answers each one in the cluster, e.g. `localhost:80 → kube-system / traefik :80 → web`, with ready endpoints and a link to the Service in Headlamp. It reads `k3d.yaml`, mounted read-only from the node, and matches each port to a LoadBalancer or NodePort Service, plus the image registry on `localhost:5005`. Postgres (5432) and NATS (4222) are exposed this way. To expose another tool, add a `127.0.0.1:<port>:<port>` mapping to `k3d.yaml` (apply it with `k3d cluster edit localdev --port-add 127.0.0.1:<port>:<port>@loadbalancer`, or `cluster:recreate`) and a LoadBalancer Service on that port in the component. A mapped port with nothing behind it (component not installed) shows grey.
     - **Events (right)** is a placeholder for now.
+  - **Logs:** stdlib `logging`, one logfmt line per record (`ts=… level=info logger=cnav.http msg="…"`), so Grafana's Logs dashboard can filter by level. Status changes are logged once (turning red is a warning), API failures are errors with the traceback, and the page's own 10-second polling and probes only show at debug. Set the level with `CNAV_LOG_LEVEL` in `20-7-cnav.yaml`.
   - **Access:** the `cnav-status` ClusterRole gives read-only access to workloads, pods, jobs, HelmCharts, pod metrics, Services and EndpointSlices.
 
 ## Google OAuth client (one-time setup)

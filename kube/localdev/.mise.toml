@@ -1,6 +1,6 @@
 # kube/localdev — ephemeral local kubernetes (k3d)
 #   cluster:  mise run cluster:create [profile] | cluster:profile [profile] | cluster:status | cluster:destroy | cluster:recreate | cluster:secrets | cluster:clean
-#   components/tools: mise run build <component> | pg:forward | pg:psql | kn:forward | keycloak:apply | keycloak:export
+#   components/tools: mise run build <component> | pg:psql | kn:forward | keycloak:apply | keycloak:export
 #   mise run grafana:list | grafana:export | grafana:import | grafana:fetch   (see grafana/dashtool.py)
 #   see readme.md
 
@@ -165,15 +165,6 @@ fi
 docker run --rm -v "$PWD/runtime.data:/data" alpine:3.22 sh -c 'rm -rf /data/* /data/.[!.]* 2>/dev/null; true'
 rmdir runtime.data
 echo "runtime.data deleted."
-"""
-
-[tasks."pg:forward"]
-description = "Port-forward postgres to localhost (default 5432)"
-usage = 'arg "[port]" default="5432"'
-raw = true
-run = """#!/bin/bash
-echo "postgresql://app:localdev@localhost:${usage_port}/app   (Ctrl-C to stop)"
-kubectl -n pg port-forward svc/postgres-rw "${usage_port}:5432"
 """
 
 [tasks."pg:psql"]

@@ -6,9 +6,12 @@ pod's service account, and /api/ports, the host ports k3d.yaml exposes and what
 answers them in the cluster. Stdlib only, plus PyYAML.
 """
 import json
+import logging
 import os
+import signal
 import ssl
 import sys
+import threading
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -17,6 +20,29 @@ from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 import yaml
+
+class LogfmtFormatter(logging.Formatter):
+    """One logfmt line per record (ts=... level=info logger=cnav msg="..."): Loki's detected_level
+    and Grafana's level filter read `level`. Tracebacks go into the err= field."""
+
+    def format(self, record):
+        line = (f"ts={datetime.fromtimestamp(record.created, timezone.utc).isoformat(timespec='milliseconds')} "
+                f"level={record.levelname.lower()} logger={record.name} "
+                f"msg={json.dumps(record.getMessage(), ensure_ascii=False)}")
+        if record.exc_info:
+            line += f" err={json.dumps(self.formatException(record.exc_info))}"
+        return line
+
+
+def setup_logging():
+    handler = logging.StreamHandler(sys.stdout)
+    handler.setFormatter(LogfmtFormatter())
+    level = os.environ.get("CNAV_LOG_LEVEL", "INFO").upper()
+    logging.basicConfig(level=getattr(logging, level, logging.INFO), handlers=[handler], force=True)
+
+
+log = logging.getLogger("cnav")
+http_log = logging.getLogger("cnav.http")
 
 STATIC_DIR = Path(os.environ.get("CNAV_STATIC", "/app/static"))
 CONFIG_DIR = Path(os.environ.get("CNAV_CONFIG", "/etc/cnav"))
@@ -29,6 +55,7 @@ def enabled_components():
     try:
         return set(PROFILE_FILE.read_text().split())
     except OSError:
+        log.debug("no profile file at %s: showing every component", PROFILE_FILE)
         return None
 
 
@@ -114,7 +141,8 @@ def pods_memory(kube, ns, selector):
     """Working-set memory of matching pods from metrics-server; None if unavailable."""
     try:
         m = kube.get(f"/apis/metrics.k8s.io/v1beta1/namespaces/{ns}/pods", labelSelector=selector)
-    except Exception:
+    except Exception as e:
+        log.debug("pod metrics unavailable for %s (%s): %s", ns, selector, e)
         return None
     if not m:
         return None
@@ -222,6 +250,8 @@ def evaluate_item(kube, item):
             else:
                 r = result("red", f"unknown check kind {kind!r}")
         except Exception as e:  # one broken check must not sink the whole page
+            log.warning("check %s %s/%s for %r failed: %s", kind, c.get("namespace", "-"), c.get("name"),
+                        item.get("name"), e)
             r = result("red", f"check error: {e}"[:160])
         results.append(r)
 
@@ -252,8 +282,27 @@ def node_memory(kube):
         alloc = sum(quantity_bytes(n["status"]["allocatable"]["memory"])
                     for n in (kube.get("/api/v1/nodes") or {}).get("items", []))
         return used or None, alloc or None
-    except Exception:
+    except Exception as e:
+        log.debug("node memory unavailable: %s", e)
         return None, None
+
+
+_last_states, _states_lock = {}, threading.Lock()
+
+
+def log_transitions(groups):
+    """Log status changes once (not on every poll): red = warning, amber or recovery = info."""
+    with _states_lock:
+        for g in groups:
+            for i in g["items"]:
+                key, state = (g["group"], i["name"]), i["state"]
+                before = _last_states.get(key)
+                _last_states[key] = state
+                if state == before or (before is None and state == "green"):
+                    continue
+                level = logging.WARNING if state == "red" else logging.INFO
+                log.log(level, "status %s/%s: %s -> %s%s", g["group"], i["name"], before or "new", state,
+                        f" ({i['reason']})" if i["reason"] else "")
 
 
 def status():
@@ -268,6 +317,7 @@ def status():
         state = max((i["state"] for i in items), key=RANK.get, default="green")
         mem = sum(i["mem"] for i in items if i["mem"] is not None)
         groups.append({"group": g.get("group", "?"), "state": state, "mem": mem, "items": items})
+    log_transitions(groups)
     node_used, node_alloc = node_memory(kube)
     return {
         "updated": datetime.now(timezone.utc).isoformat(timespec="seconds"),
@@ -317,7 +367,8 @@ def registry_up(host_port):
     try:   # the k3d registry container listens on :5000; k3d adds its name to CoreDNS
         with urllib.request.urlopen("http://localdev-registry:5000/v2/", timeout=2):
             return True
-    except Exception:
+    except Exception as e:
+        log.debug("registry not reachable: %s", e)
         return False
 
 
@@ -384,11 +435,13 @@ class Handler(SimpleHTTPRequestHandler):
             try:
                 return self.send_json(200, status())
             except Exception as e:
+                log.exception("/api/status failed")
                 return self.send_json(503, {"error": str(e)})
         if path == "/api/ports":
             try:
                 return self.send_json(200, ports())
             except Exception as e:
+                log.exception("/api/ports failed")
                 return self.send_json(503, {"error": str(e)})
         if path in ("/cards.yaml", "/status.yaml"):
             f = CONFIG_DIR / path.lstrip("/")
@@ -411,11 +464,38 @@ class Handler(SimpleHTTPRequestHandler):
             self.path = "/index.html"  # catch-all: unknown paths land on the navigator
         return super().do_GET()
 
+    # access log: errors loud, the page's own 10-second polling and probes only at debug
+    QUIET = ("/healthz", "/api/status", "/api/ports")
+
+    def log_request(self, code="-", size="-"):
+        try:
+            code = int(code)   # HTTPStatus or int; "-" when unknown
+        except (TypeError, ValueError):
+            code = 0
+        parts = self.requestline.split()   # as requested (self.path may be rewritten, e.g. catch-all)
+        target = parts[1] if len(parts) > 1 else self.path
+        level = (logging.ERROR if code >= 500 and code not in (501, 505)   # 501/505: the client's fault
+                 else logging.WARNING if code >= 400
+                 else logging.DEBUG if urllib.parse.urlparse(target).path in self.QUIET else logging.INFO)
+        user = self.headers.get("X-Auth-Request-Email") or self.headers.get("X-Auth-Request-User") or "-"
+        http_log.log(level, "%s %s %s user=%s client=%s", self.command, target, code, user,
+                     self.headers.get("X-Forwarded-For", self.client_address[0]))
+
+    def log_error(self, fmt, *args):   # detail of a send_error(); log_request reports the request
+        http_log.debug(fmt, *args)
+
     def log_message(self, fmt, *args):
-        if "/healthz" not in (args[0] if args else ""):
-            sys.stderr.write("%s %s\n" % (self.address_string(), fmt % args))
+        http_log.info(fmt, *args)
 
 
 if __name__ == "__main__":
-    print(f"cnav listening on :{PORT}", flush=True)
+    setup_logging()
+
+    def stop(signum, _frame):   # PID 1 gets no default SIGTERM handling: exit now, not after 30s
+        log.info("received %s, shutting down", signal.Signals(signum).name)
+        sys.exit(0)
+
+    signal.signal(signal.SIGTERM, stop)
+    log.info("cnav listening on :%d (config %s, log level %s)", PORT, CONFIG_DIR,
+             logging.getLevelName(logging.getLogger().level).lower())
     ThreadingHTTPServer(("", PORT), Handler).serve_forever()

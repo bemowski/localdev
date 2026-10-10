@@ -238,6 +238,8 @@ spec:
         - name: cnav
           image: localdev-registry:5005/cnav:latest
           imagePullPolicy: Always
+          env:
+            - {name: CNAV_LOG_LEVEL, value: INFO}   # DEBUG adds the page's polling, probes, metrics misses
           ports:
             - containerPort: 8080
           readinessProbe:

@@ -156,3 +156,16 @@ spec:
                 name: nui
                 port:
                   number: 80
+---
+# localhost:4222 on this machine (k3d.yaml maps it to the node; k3s's service LB binds it there)
+apiVersion: v1
+kind: Service
+metadata:
+  name: nats-local
+  namespace: nats
+spec:
+  type: LoadBalancer
+  selector: {app.kubernetes.io/component: nats, app.kubernetes.io/instance: nats, app.kubernetes.io/name: nats}
+  ports:
+    - name: nats
+      port: 4222
