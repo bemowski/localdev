@@ -2,6 +2,7 @@
 #   components/<name>/manifests/    deployed by k3s
 #   components/<name>/dashboards/   shown in Grafana's "tools" folder (optional)
 #   components/<name>/docker/       image built by `mise run build <name>` (optional)
+#   components/<name>/build.sh      custom image build, used instead of docker/ (optional)
 # platform, infra and apps (manifests/, grafana/dashboards/) are always deployed.
 #
 #   mise run cluster:create [profile]   create with a profile (default below, or the last one used)
@@ -12,9 +13,9 @@ default = "dev"
 
 [profiles]
 lite    = { description = "Core only: SSO, observability, registry, cnav", components = [] }
-dev     = { description = "App development: Postgres + NATS", components = ["postgres", "nats"] }
-knative = { description = "Serverless and eventing", components = ["postgres", "nats", "knative"] }
-full    = { description = "Everything", components = ["postgres", "nats", "knative", "keycloak"] }
+dev     = { description = "App development: Postgres + NATS + docs", components = ["postgres", "nats", "docs"] }
+knative = { description = "Serverless and eventing", components = ["postgres", "nats", "knative", "docs"] }
+full    = { description = "Everything", components = ["postgres", "nats", "knative", "keycloak", "docs"] }
 
 # Extra component metadata. Components themselves are discovered from components/*/.
 #   requires = [...]   other components it needs (auto-included)

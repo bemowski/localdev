@@ -98,15 +98,21 @@ kubectl -n auth rollout restart deploy/oauth2-proxy >/dev/null 2>&1 && echo "  r
 """
 
 [tasks.build]
-description = "Build components/<component>/docker, push to the local registry, restart its deployment"
-usage = 'arg "<component>" help="component with a docker/ folder"'
+description = "Build a component's image (its build.sh, else components/<component>/docker), push it, restart its deployment"
+usage = 'arg "<component>" help="component with a build.sh or a docker/ folder"'
 run = """#!/bin/bash
 set -euo pipefail
 app="$usage_component"
-[ -d "components/$app/docker" ] || { echo "ERROR: components/$app/docker/ not found" >&2; exit 1; }
 image="localhost:5005/$app:latest"       # pulled in-cluster as localdev-registry:5005/$app
 
-docker build -t "$image" "components/$app/docker"
+if [ -x "components/$app/build.sh" ]; then
+    # the component builds itself (e.g. stages files from outside its folder): must build $IMAGE
+    IMAGE="$image" LOCALDEV_ROOT="{{config_root}}" "components/$app/build.sh"
+elif [ -d "components/$app/docker" ]; then
+    docker build -t "$image" "components/$app/docker"
+else
+    echo "ERROR: components/$app has neither build.sh nor docker/" >&2; exit 1
+fi
 docker push "$image"
 
 # restart any deployment labelled app=<app> so it pulls the new :latest

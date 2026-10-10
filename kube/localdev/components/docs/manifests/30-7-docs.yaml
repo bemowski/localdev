@@ -1,0 +1,72 @@
+# Docs at /docs/ (behind SSO): MkDocs site built from kube/localdev/docs by `mise run build docs`.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: docs
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: docs
+  namespace: docs
+  labels: {app: docs}
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {app: docs}
+  template:
+    metadata:
+      labels: {app: docs}
+    spec:
+      enableServiceLinks: false
+      containers:
+        - name: docs
+          image: localdev-registry:5005/docs:latest
+          imagePullPolicy: Always
+          ports:
+            - containerPort: 8080
+          readinessProbe:
+            httpGet: {path: /healthz, port: 8080}
+          resources:
+            requests: {cpu: 10m, memory: 16Mi}
+            limits: {memory: 64Mi}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: docs
+  namespace: docs
+spec:
+  selector: {app: docs}
+  ports:
+    - port: 80
+      targetPort: 8080
+---
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  name: sso
+  namespace: docs
+spec:
+  forwardAuth:
+    address: http://oauth2-proxy.auth.svc.cluster.local/   # signed in: 202 + identity headers; signed out: sign-in page (allow-list: 10-2-oauth2-proxy.yaml)
+    authResponseHeaders: [X-Auth-Request-Email, X-Auth-Request-User]
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: docs
+  namespace: docs
+  annotations:
+    traefik.ingress.kubernetes.io/router.middlewares: docs-sso@kubernetescrd
+spec:
+  rules:
+    - http:
+        paths:
+          - path: /docs
+            pathType: Prefix
+            backend:
+              service:
+                name: docs
+                port:
+                  number: 80

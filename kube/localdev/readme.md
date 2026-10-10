@@ -2,6 +2,8 @@
 
 Ephemeral local Kubernetes (k3d) with path-based routing on `http://localhost/<app>`, behind Google SSO.
 
+**Docs:** [http://localhost/docs/](http://localhost/docs/) when the cluster runs (source: [`docs/content/`](docs/content/)): getting started, cluster layout, profiles and components, manifest rules. This readme keeps the setup and reference details.
+
 | path | app |
 |---|---|
 | `/` | Cluster navigator (cnav): cards linking to the apps below. It's also the catch-all, so unknown paths land here. |
@@ -13,6 +15,7 @@ Ephemeral local Kubernetes (k3d) with path-based routing on `http://localhost/<a
 | `/pgweb` | pgweb, a Postgres web UI. Each browser tab has its own connection: pick a database bookmark (`app`, `keycloak`) on the connect screen |
 | `/nats` | NUI, a NATS web UI: live subscribe and publish on subjects, plus JetStream streams, consumers, KV and object stores |
 | `/keycloak/admin` | Keycloak admin console (an identity provider for apps), behind SSO. `/keycloak/realms/*` (login, token, discovery) is public |
+| `/docs` | localdev docs (MkDocs, built from `docs/`) |
 | `/registry` | Registry UI (joxit/docker-registry-ui), read-only, for browsing images in the k3d registry (`localhost:5005`) |
 | *(no route)* | Loki holds every pod's logs, shipped by Alloy. Query them in Grafana → Explore → Loki, e.g. `{namespace="demo", app="whoami"}`. |
 | `/oauth2/*` | oauth2-proxy sign-in and callback (`/oauth2/sign_out` to log out) |
@@ -44,7 +47,7 @@ mise run cluster:recreate [profile]         # destroy + create
 mise run cluster:clean                      # delete runtime.data (asks first; cluster must be destroyed; keeps the profile)
 
 # apps and tools
-mise run build cnav                         # rebuild components/cnav/docker, push to the local registry, restart it
+mise run build <component>                  # rebuild a component's image (cnav, docs), push to the local registry, restart it
 mise run pg:psql                            # psql shell in the postgres pod
 mise run kn:forward                         # Knative internal gateway on localhost:8081 (call with a Host header)
 mise run keycloak:apply                     # apply keycloak/realms/*.json to Keycloak (idempotent)
@@ -58,62 +61,9 @@ mise run grafana:fetch <grafana.com id> <folder>
 mise run grafana:check                      # JSON valid + uids unique (a duplicate freezes ALL provisioning)
 ```
 
-## Profiles and components
+## Profiles, layout and components
 
-Not everyone needs every tool. A **profile** (`profiles.toml`) chooses which optional **components** (tools) a cluster runs. Platform, infra and apps always run.
-
-| profile | tools | |
-|---|---|---|
-| `lite` | none | SSO, observability, registry, cnav |
-| `dev` (default) | postgres, nats | app development |
-| `knative` | postgres, nats, knative | serverless and eventing |
-| `full` | postgres, nats, knative, keycloak | everything |
-
-- **Choosing a profile:**
-  - `mise run cluster:create <profile>`. With no argument it uses the last profile, else the default.
-  - `mise run cluster:profile <profile>` switches a running cluster: new tools deploy within seconds, and dropped ones are uninstalled (HelmCharts, namespaces). Their data in `runtime.data/` is kept, so switching back restores it.
-  - `mise run cluster:profile` lists the profiles.
-- **Dependencies:** `requires` in `profiles.toml` adds components automatically (keycloak needs postgres).
-- **A component is a folder:** `components/<name>/manifests/` (deployed by k3s), plus optional `dashboards/` (shown in Grafana's *tools* folder) and `docker/` (your application code: an image built by `mise run build <name>`, see [Images](#images-componentsnamedocker)).
-  - To add a tool, create that folder and add it to the profiles you want.
-  - Optional metadata in `profiles.toml` under `[components.<name>]`: `requires` (other components), `layer` (`platform`, `infra`, `tools` (default) or `apps`, deciding where its manifests deploy) and `always = true` (in every profile). cnav is `layer = "infra"`, `always = true`.
-  - Manifest files must be `.yaml`, never `.json`, because k3s applies every JSON file it sees.
-  - `mise run grafana:export <dashboard> component:<name>` saves a dashboard into a component.
-- **cnav** hides the cards and status rows tagged `tool: <component>` when that component isn't in the profile.
-
-**How it works:** `profile.py` builds **`runtime.profile/`** (gitignored, kept by `cluster:clean`), the view the cluster reads. It contains links only, so edits to the real files stay live:
-- `runtime.profile/manifests/` is mounted as k3s's manifests folder: a real folder per layer (`10-platform`, `20-infra`, `30-tools`, `50-apps`, deployed in that order) holding **directory links**: `core` for the layer's files in `manifests/<layer>/`, and one per enabled component in that layer (`20-infra/cnav/20-7-cnav.yaml`, `30-tools/postgres/30-2-postgres.yaml`).
-- `runtime.profile/dashboards/` is Grafana's provider path, with real folders of **file links**.
-
-k3s follows directory links, and Grafana follows file links (not directory links). The repo is mounted read-only inside the node at its own path, and at `/localdev`, so the links resolve in the cluster too.
-
-```
-manifests/                       # always on
-  10-platform/  10-1-traefik-config  10-2-oauth2-proxy (ns auth)
-  20-infra/     20-1-headlamp (ns headlamp)  20-2-monitoring (ns monitoring)  20-3-logging  20-4-scrape  20-5-tracing  20-6-registry-ui (ns registry)
-  50-apps/      50-1-whoami (ns demo)
-components/                      # chosen by profile (layer tools unless profiles.toml says otherwise)
-  cnav/      manifests/20-7-cnav (ns cnav)                docker/   (always on, layer infra)
-  postgres/  manifests/30-2-postgres (ns pg)              dashboards/
-  nats/      manifests/30-3-nats (ns nats)                dashboards/
-  knative/   manifests/30-4-knative-operator 30-5-knative (ns knative-*)  dashboards/
-  keycloak/  manifests/30-6-keycloak (ns keycloak)        dashboards/
-grafana/dashboards/              # always on: platform/ infra/ apps/ logs.json
-profiles.toml  profile.py  runtime.profile/ (generated)  runtime.data/ (data)
-```
-
-### Manifest rules
-Files are applied live: saving a file re-applies it within seconds.
-- **Each file creates the namespace(s) it uses**, at the top of the file, and HelmCharts set `createNamespace: true`. That way a component brings, and takes away, its own namespaces. k3s retries a file until it applies, so the order sorts itself out.
-- Subfolders work at any depth.
-- **Filenames must be unique across the whole tree.** k3s tracks each file as an AddOn named after the file's base name, ignoring the folder.
-  - The name is cut at the **first dot**. `10.1-a.yaml` and `10.2-b.yaml` would both become AddOn `10`, and the two files would keep deleting each other's objects.
-  - So name files `<folder number>-<n>-<name>.yaml`, with dashes and no dots before `.yaml`.
-  - After renaming a file, delete its old AddOn entry with `kubectl -n kube-system delete addon <old-name>`. That removes only the tracking entry, not the objects.
-- Removing an object from a file deletes it from the cluster.
-- Changing a `HelmChart`'s `valuesContent` runs a Helm upgrade.
-- **Deleting a whole file does not delete its objects.** Remove them from the file first, or `kubectl delete` them.
-- Changes to `k3d.yaml` need `mise run cluster:recreate`. `runtime.data/` is kept across it. After editing `secrets.env`, run `mise run cluster:secrets`, which updates the running cluster.
+See the docs: [Getting started](docs/content/getting-started.md) (profiles), [Cluster layout](docs/content/cluster-layout.md) (layers, `runtime.profile/`, manifest rules) and [Components](docs/content/components.md) (component folders, `profiles.toml` metadata, adding one).
 
 **Signing in.** Every app goes through oauth2-proxy (each namespace has an `sso` forwardAuth Middleware). Its sign-in page offers two ways in:
 - **Sign in with Google.** Only accounts on the **allow-list** in `manifests/10-platform/10-2-oauth2-proxy.yaml` (`authenticatedEmailsFile.restricted_access`, one per line) get in, and the list applies to every app. Google accounts must also be test users on the consent screen (below).
@@ -308,10 +258,11 @@ Keycloak 26 runs in namespace `keycloak` (`components/keycloak/manifests/30-6-ke
 - **Metrics:** Keycloak is scraped via the `metrics: enabled` label. User-event metrics and HTTP latency histograms are on. Dashboards are in `tools/`.
 - **Resources:** about 0.5–0.7 GiB of memory, and roughly 30–60 seconds to start.
 
-## Images (`components/<name>/docker/`)
+## Images (`components/<name>/docker/`, `build.sh`)
 
-A component's optional `docker/` folder holds application code and its Dockerfile. `mise run build <name>` builds it as `localhost:5005/<name>:latest`, pushes it to the k3d registry and restarts any deployment labelled `app=<name>`. Inside the cluster, the image is pulled as `localdev-registry:5005/<name>:latest`. `mise run cluster:create` builds every enabled component that has one, and `cluster:profile` builds those it adds.
+A component's optional `docker/` folder holds application code and its Dockerfile. `mise run build <name>` builds it as `localhost:5005/<name>:latest`, pushes it to the k3d registry and restarts any deployment labelled `app=<name>`. Inside the cluster, the image is pulled as `localdev-registry:5005/<name>:latest`. If the component has an executable `build.sh`, the task runs that instead of building `docker/` (with `IMAGE` and `LOCALDEV_ROOT` set; it must build `$IMAGE`). `mise run cluster:create` builds every enabled component that has an image, and `cluster:profile` builds those it adds.
 
+- **docs** (`components/docs`): `build.sh` copies its `docker/` files and the top-level `docs/` into a temporary build context. The multi-stage Dockerfile renders the markdown with MkDocs Material (`mkdocs build --strict`: broken links fail the build) and serves the site from nginx under `/docs/`. Edit `docs/content/*.md` (and `docs/mkdocs.yml` for the nav), then `mise run build docs`.
 - **cnav** (code in `components/cnav/docker/`, deployed by `components/cnav/manifests/20-7-cnav.yaml`): a small Python server (stdlib plus PyYAML) serving the navigator page.
   - **Cards (left):** from `cards.yaml`. Fields: `component`, `icon` (an emoji), `link`, an optional `description`, and optional `links`: a list of `{label, url}` shown as pill buttons on the card's bottom row, each opening in a new tab (e.g. a docs link).
   - **Status column (right):** from `status.yaml`. It's organised as groups, then items, then checks. Check kinds are `Deployment`, `StatefulSet` and `DaemonSet` (with `namespace` and `name`), and `HelmChart` (with `name`). An item's light is the worst of its checks, and a group's light is the worst of its items. Clicking a row opens the first workload in Headlamp. The column refreshes every 10 seconds.

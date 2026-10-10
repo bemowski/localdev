@@ -34,6 +34,11 @@ data:
       icon: 🐘
       link: /pgweb/
       description: Postgres (pg/postgres-rw), app database
+    - component: Docs
+      tool: docs
+      icon: 📚
+      link: /docs/
+      description: How localdev works, getting started, components
     - component: NATS
       tool: nats
       icon: 📨
@@ -130,6 +135,10 @@ data:
           tool: nats
           checks:
             - {kind: Deployment, namespace: nats, name: nats-box}
+        - name: Docs
+          tool: docs
+          checks:
+            - {kind: Deployment, namespace: docs, name: docs}
         - name: Keycloak
           tool: keycloak
           checks:

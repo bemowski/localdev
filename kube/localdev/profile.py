@@ -23,7 +23,7 @@ the real files stay live:
   removed <to> [addons] manifest files to delete to reach <to>: components still deployed
                         (their AddOns exist) but not in <to>; dependents first, files reversed
   missing [addons]      manifest files of enabled components not yet deployed (to touch)
-  buildable             enabled components with a docker/ folder (images to build)
+  buildable             enabled components with an image to build (build.sh or docker/)
   check                 validate profiles.toml and components/
 """
 import os
@@ -229,7 +229,8 @@ def main():
         cmd_removed(args)
     elif cmd == "buildable":
         comps = (VIEW / "components").read_text().split() if (VIEW / "components").exists() else []
-        print("\n".join(c for c in comps if (COMPONENTS / c / "docker").is_dir()))
+        print("\n".join(c for c in comps
+                        if (COMPONENTS / c / "build.sh").is_file() or (COMPONENTS / c / "docker").is_dir()))
     elif cmd == "missing":
         cmd_missing(args)
     elif cmd == "check":
