@@ -1,0 +1,17 @@
+# usage cluster-agent: stdlib-only Python pod (kube-system) that sends localdev events to a usage
+# server. A localdev component (manifests/, docker/); see ../readme.md.
+#   mise run test    unit tests + contract test (events vs ../openapi.yaml)
+#   mise run image   build the image (IMAGE=usage-agent:dev); in localdev: `mise run build usage-agent`
+
+[tools]
+uv = '0.12.24'
+
+[tasks.test]
+description = "Run the agent tests (stdlib unittest; jsonschema only for the contract test)"
+dir = "{{config_root}}"
+run = "uv run --no-project --python 3.13 --with jsonschema==4.26.0 --with rfc3339-validator==0.1.4 --with pyyaml==6.0.3 python -m unittest discover -s tests -v"
+
+[tasks.image]
+description = "Build the agent image"
+dir = "{{config_root}}"
+run = 'docker build -t "${IMAGE:-usage-agent:dev}" docker'

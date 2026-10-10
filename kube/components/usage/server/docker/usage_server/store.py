@@ -80,49 +80,65 @@ class Store:
 
 
 # ---------- projections: event type -> typed tables ----------
-# A type without a handler is still stored (in `events`).
+# A type without a handler is still stored (in `events`). Every cluster handler first calls
+# _touch_cluster: the cluster's row exists (whatever order events arrive in) and last_seen_at moves.
+
+async def _touch_cluster(conn: AsyncConnection, ev: dict):
+    await conn.execute(
+        """INSERT INTO clusters (cluster_id, username, last_seen_at) VALUES (%s, %s, %s::timestamptz)
+           ON CONFLICT (cluster_id) DO UPDATE SET
+               last_seen_at = GREATEST(clusters.last_seen_at, EXCLUDED.last_seen_at)""",
+        (ev["data"]["cluster_id"], ev["username"], ev["occurred_at"]))
+
 
 async def _cluster_created(conn: AsyncConnection, ev: dict):
     d = ev["data"]
+    await _touch_cluster(conn, ev)
     await conn.execute(
-        """INSERT INTO localdev_clusters (cluster_id, username, created_at, profile, components, platform,
-               platform_version, kubernetes_version, os, os_variant, os_version, arch, created_event_id)
-           VALUES (%s, %s, %s::timestamptz, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-           ON CONFLICT (cluster_id) DO UPDATE SET
-               username = EXCLUDED.username, created_at = EXCLUDED.created_at, profile = EXCLUDED.profile,
-               components = EXCLUDED.components, platform = EXCLUDED.platform,
-               platform_version = EXCLUDED.platform_version, kubernetes_version = EXCLUDED.kubernetes_version,
-               os = EXCLUDED.os, os_variant = EXCLUDED.os_variant, os_version = EXCLUDED.os_version,
-               arch = EXCLUDED.arch, created_event_id = EXCLUDED.created_event_id""",
-        (d["cluster_id"], ev["username"], ev["occurred_at"], d["profile"], d["components"], d["platform"],
-         d["platform_version"], d["kubernetes_version"], d["os"], d.get("os_variant"), d["os_version"],
-         d["arch"], ev["event_id"]))
+        """UPDATE clusters SET
+               cluster_type = %s, cluster_role = %s, username = %s, created_at = %s::timestamptz,
+               platform = %s, platform_version = %s, kubernetes_version = %s, arch = %s,
+               profile = %s, components = %s, os = %s, os_variant = %s, os_version = %s,
+               created_event_id = %s
+           WHERE cluster_id = %s""",
+        (d["cluster_type"], d["cluster_role"], ev["username"], ev["occurred_at"],
+         d["platform"], d.get("platform_version"), d["kubernetes_version"], d.get("arch"),
+         d.get("profile"), d.get("components"), d.get("os"), d.get("os_variant"), d.get("os_version"),
+         ev["event_id"], d["cluster_id"]))
 
 
 async def _cluster_destroyed(conn: AsyncConnection, ev: dict):
+    await _touch_cluster(conn, ev)
     await conn.execute(
-        """INSERT INTO localdev_clusters (cluster_id, username, destroyed_at, destroyed_event_id)
-           VALUES (%s, %s, %s::timestamptz, %s)
-           ON CONFLICT (cluster_id) DO UPDATE SET
-               destroyed_at = EXCLUDED.destroyed_at, destroyed_event_id = EXCLUDED.destroyed_event_id""",
-        (ev["data"]["cluster_id"], ev["username"], ev["occurred_at"], ev["event_id"]))
+        "UPDATE clusters SET destroyed_at = %s::timestamptz, destroyed_event_id = %s WHERE cluster_id = %s",
+        (ev["occurred_at"], ev["event_id"], ev["data"]["cluster_id"]))
 
 
 async def _cluster_event(conn: AsyncConnection, ev: dict):
     d = ev["data"]
+    await _touch_cluster(conn, ev)
     await conn.execute(
-        "INSERT INTO localdev_clusters (cluster_id, username) VALUES (%s, %s) ON CONFLICT DO NOTHING",
-        (d["cluster_id"], ev["username"]))
-    await conn.execute(
-        """INSERT INTO localdev_cluster_events
+        """INSERT INTO cluster_events
                (event_id, cluster_id, occurred_at, username, name, outcome, duration_ms, attributes)
            VALUES (%s, %s, %s::timestamptz, %s, %s, %s, %s, %s)""",
         (ev["event_id"], d["cluster_id"], ev["occurred_at"], ev["username"], d["name"], d.get("outcome"),
          d.get("duration_ms"), Jsonb(d.get("attributes", {}))))
 
 
+async def _cluster_heartbeat(conn: AsyncConnection, ev: dict):
+    d = ev["data"]
+    await _touch_cluster(conn, ev)
+    await conn.execute(
+        """INSERT INTO cluster_heartbeats
+               (event_id, cluster_id, occurred_at, nodes, cores, memory_bytes, pods, namespaces)
+           VALUES (%s, %s, %s::timestamptz, %s, %s, %s, %s, %s)""",
+        (ev["event_id"], d["cluster_id"], ev["occurred_at"], d["nodes"], d["cores"], d["memory_bytes"],
+         d["pods"], d["namespaces"]))
+
+
 HANDLERS = {
-    "localdev.cluster.created": _cluster_created,
-    "localdev.cluster.destroyed": _cluster_destroyed,
-    "localdev.cluster.event": _cluster_event,
+    "cluster.created": _cluster_created,
+    "cluster.destroyed": _cluster_destroyed,
+    "cluster.event": _cluster_event,
+    "cluster.heartbeat": _cluster_heartbeat,
 }

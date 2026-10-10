@@ -8,11 +8,13 @@ validator = BatchValidator.from_file(SPEC)
 
 # invalid example -> the (index, path) the error must point at
 EXPECTED = {
+    "bad-cluster-role.json": (0, "data.cluster_role"),
     "bad-event-id.json": (0, "event_id"),
     "bad-event-name.json": (0, "data.name"),
     "bad-os.json": (0, "data.os"),
     "bad-timestamp.json": (0, "occurred_at"),
     "empty-batch.json": (None, "events"),
+    "heartbeat-missing-stat.json": (0, "data"),
     "missing-required.json": (0, "data"),
     "nested-attribute.json": (0, "data.attributes.nested"),
     "unknown-envelope-field.json": (0, ""),
@@ -39,11 +41,11 @@ def test_invalid_examples_point_at_the_problem(name):
 
 
 def test_errors_carry_each_bad_events_index():
-    batch = example("batch.json")
-    batch["events"][1]["data"]["outcome"] = "maybe"
-    batch["events"][3]["username"] = ""
+    batch = example("batch.json")  # created, heartbeat, tests.run, app.deployed, destroyed
+    batch["events"][2]["data"]["outcome"] = "maybe"
+    batch["events"][4]["username"] = ""
     details = validator.errors(batch)
-    assert [(d["index"], d["path"]) for d in details] == [(1, "data.outcome"), (3, "username")]
+    assert [(d["index"], d["path"]) for d in details] == [(2, "data.outcome"), (4, "username")]
 
 
 def test_missing_type():

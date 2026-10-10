@@ -51,17 +51,24 @@ Every event has the envelope `event_id, type, occurred_at, username, source{name
 
 | type | data |
 |---|---|
-| `localdev.cluster.created` | `cluster_id, profile, components[], platform (k3d), platform_version, kubernetes_version, os (linux/macos/windows), os_variant?, os_version, arch (amd64/arm64)` |
-| `localdev.cluster.destroyed` | `cluster_id` |
-| `localdev.cluster.event` | `cluster_id, name (e.g. tests.run), outcome? (success/failure/cancelled), duration_ms?, attributes? (flat, ≤50 keys)` |
+| `cluster.created` | `cluster_id, cluster_type (localdev/ephemeral/durable), cluster_role (dev/test/stage/prod/perftest), platform (k3d, eks, ...), kubernetes_version`; optional `platform_version, arch`, and for localdev `profile, components[], os, os_variant, os_version` |
+| `cluster.heartbeat` | `cluster_id, nodes, cores, memory_bytes, pods, namespaces` (capacity summed over nodes) |
+| `cluster.event` | `cluster_id, name (e.g. tests.run), outcome? (success/failure/cancelled), duration_ms?, attributes? (flat, ≤50 keys)` |
+| `cluster.destroyed` | `cluster_id` |
+
+Cluster facts are sent once, in `cluster.created`. The other cluster events only carry `cluster_id`.
 
 ## Server (`server/`)
 
 FastAPI + psycopg. Requests are validated against `openapi.yaml` itself (jsonschema), so the server
 can't drift from the spec. Each batch is written in one transaction:
 - **`events`** gets every accepted event as received (jsonb `data`). It's the source of truth.
-- **Typed projections** are filled by handlers in `store.py`: `localdev_clusters` (one row per cluster,
-  correct whatever order created/destroyed/ad-hoc events arrive in) and `localdev_cluster_events`.
+- **Typed projections** are filled by handlers in `store.py`, normalized on `cluster_id`:
+  - `clusters`: one row per cluster, with type, role, platform, versions, the localdev facts,
+    `created_at`, `destroyed_at` and `last_seen_at` (the latest event of any kind). It comes out
+    right whatever order events arrive in.
+  - `cluster_events`: ad-hoc events (`app.deployed`, `tests.run`, ...).
+  - `cluster_heartbeats`: one row per heartbeat, with the size stats.
 - Duplicates are skipped before projection, so retries never double-count.
 
 | | |
@@ -111,14 +118,19 @@ events to `USAGE_URL` (default `http://usage.usage.svc`, set in the manifest). I
 
 | event | when |
 |---|---|
-| `localdev.cluster.created` | once per cluster. `cluster_id` is the `kube-system` namespace UID, `occurred_at` its creation time |
-| `localdev.cluster.event` `profile.changed` | `cnav/localdev-profile` changes (profile or components) |
-| `localdev.cluster.event` `app.deployed` | a Deployment in a user namespace is created or changed (new generation). User namespaces are those not created by localdev's manifests (no `objectset.rio.cattle.io/hash` label) and not `kube-*` |
-| `localdev.cluster.event` `cluster.heartbeat` | at start and every 15 min. The agent dies with the cluster, so it can't send `destroyed`; heartbeats give "last seen" |
+| `cluster.created` | once per cluster. `cluster_id` is the `kube-system` namespace UID, `occurred_at` its creation time |
+| `cluster.heartbeat` | at start and every 15 min, with nodes, cores, memory, pods and namespaces. The agent dies with the cluster, so it can't send `destroyed`; heartbeats give "last seen" |
+| `cluster.event` `profile.changed` | `cnav/localdev-profile` changes (profile or components) |
+| `cluster.event` `app.deployed` | a Deployment in a user namespace is created or changed (new generation). User namespaces are those not created by localdev's manifests (no `objectset.rio.cattle.io/hash` label) and not `kube-*` |
 
-- **Host facts:** username, host OS and k3d version come from ConfigMap `kube-system/localdev-host`,
-  which localdev's `cluster:create` / `cluster:profile` write (`kube/localdev/hostfacts.py`).
-  Until it exists, the agent sends nothing.
+- **Cluster facts:**
+  - On localdev: from ConfigMap `kube-system/localdev-host`, which localdev's `cluster:create` /
+    `cluster:profile` write (`kube/localdev/hostfacts.py`). It holds username, `cluster_type`,
+    `cluster_role` (set with `[cluster] role = "..."` in `local.toml`, default dev), host OS and k3d
+    version. Profile and components come from `cnav/localdev-profile`.
+  - On other clusters: `CLUSTER_TYPE`, `CLUSTER_ROLE`, `CLUSTER_USERNAME` and `CLUSTER_PLATFORM` env.
+    The platform is otherwise guessed from the kubelet version.
+  - Until a cluster type is known, the agent sends nothing.
 - **Best-effort delivery:** one file per event in an `emptyDir` spool, POSTed in batches every 30 s.
   - 5xx or unreachable: kept and retried.
   - 422: only the rejected events are dropped.

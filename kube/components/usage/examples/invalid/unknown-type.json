@@ -2,28 +2,30 @@
   "events": [
     {
       "event_id": "0f8e6d2a-3b1c-4e5f-9a7b-1c2d3e4f5a6b",
-      "type": "localdev.cluster.paused",
+      "type": "cluster.paused",
       "occurred_at": "2026-10-10T14:03:22Z",
       "username": "alice",
       "source": {
-        "name": "localdev-client",
-        "version": "de78fa6"
+        "name": "localdev-cluster-agent",
+        "version": "0.2.0"
       },
       "data": {
         "cluster_id": "7c9e6679-7425-40de-944b-e07fc1f90ae7",
+        "cluster_type": "localdev",
+        "cluster_role": "dev",
+        "platform": "k3d",
+        "platform_version": "v5.9.0",
+        "kubernetes_version": "v1.36.5+k3s1",
+        "arch": "amd64",
         "profile": "dev",
         "components": [
           "postgres",
           "nats",
           "docs"
         ],
-        "platform": "k3d",
-        "platform_version": "v5.9.0",
-        "kubernetes_version": "v1.33.4+k3s1",
         "os": "windows",
         "os_variant": "wsl2",
-        "os_version": "Ubuntu 24.04",
-        "arch": "amd64"
+        "os_version": "Ubuntu 24.04"
       }
     }
   ]

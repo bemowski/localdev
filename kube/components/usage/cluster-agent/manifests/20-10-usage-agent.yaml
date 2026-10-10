@@ -1,0 +1,75 @@
+# usage cluster-agent: watches this cluster and sends usage events (cluster created, heartbeat
+# with cluster size, profile changed, app deployed) to a usage server. Best-effort: events spool in an emptyDir.
+#   build: mise run build usage-agent      code: kube/components/usage/cluster-agent/docker/agent.py
+#   needs: ConfigMap kube-system/localdev-host (host facts), written by localdev's tasks
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: usage-agent
+  namespace: kube-system
+---
+# read-only: cluster identity, nodes, pod/namespace counts, the two localdev ConfigMaps, Deployments
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: usage-agent
+rules:
+  - apiGroups: [""]
+    resources: [namespaces]
+    verbs: [get, list]
+  - apiGroups: [""]
+    resources: [nodes, pods]           # pods: counted for the heartbeat (metadata only)
+    verbs: [list]
+  - apiGroups: [""]
+    resources: [configmaps]
+    resourceNames: [localdev-host, localdev-profile]
+    verbs: [get]
+  - apiGroups: [apps]
+    resources: [deployments]
+    verbs: [list]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: usage-agent
+roleRef: {apiGroup: rbac.authorization.k8s.io, kind: ClusterRole, name: usage-agent}
+subjects:
+  - {kind: ServiceAccount, name: usage-agent, namespace: kube-system}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: usage-agent
+  namespace: kube-system
+  # localdev/component + status-group: a row in cnav's infra group
+  labels: {app: usage-agent, localdev/component: usage-agent, localdev/status-group: infra}
+spec:
+  replicas: 1
+  strategy: {type: Recreate}
+  selector:
+    matchLabels: {app: usage-agent}
+  template:
+    metadata:
+      labels: {app: usage-agent}
+    spec:
+      serviceAccountName: usage-agent
+      enableServiceLinks: false
+      terminationGracePeriodSeconds: 10      # SIGTERM: one last flush, then exit
+      containers:
+        - name: usage-agent
+          image: localdev-registry:5005/usage-agent:latest
+          imagePullPolicy: Always
+          env:
+            - {name: USAGE_URL, value: "http://usage.usage.svc"}   # where a usage server runs
+          volumeMounts:
+            - {name: spool, mountPath: /spool}
+          resources:
+            requests: {cpu: 5m, memory: 16Mi}
+            limits: {memory: 64Mi}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+      volumes:
+        - name: spool                          # ephemeral: losing events on a restart is fine
+          emptyDir: {sizeLimit: 20Mi}

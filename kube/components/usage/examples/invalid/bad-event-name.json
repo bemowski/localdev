@@ -2,12 +2,12 @@
   "events": [
     {
       "event_id": "5a1b2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d",
-      "type": "localdev.cluster.event",
+      "type": "cluster.event",
       "occurred_at": "2026-10-10T14:20:05Z",
       "username": "alice",
       "source": {
-        "name": "localdev-client",
-        "version": "de78fa6"
+        "name": "localdev-cluster-agent",
+        "version": "0.2.0"
       },
       "data": {
         "cluster_id": "7c9e6679-7425-40de-944b-e07fc1f90ae7",

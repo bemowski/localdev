@@ -2,11 +2,16 @@
   "events": [
     {
       "event_id": "9d8c7b6a-5f4e-4d3c-8b2a-1f0e9d8c7b6a",
-      "type": "localdev.cluster.destroyed",
+      "type": "cluster.destroyed",
       "occurred_at": "2026-10-10T17:45:00Z",
       "username": "alice",
-      "source": {"name": "localdev-client", "version": "de78fa6"},
-      "data": {"cluster_id": "7c9e6679-7425-40de-944b-e07fc1f90ae7"}
+      "source": {
+        "name": "localdev-client",
+        "version": "de78fa6"
+      },
+      "data": {
+        "cluster_id": "7c9e6679-7425-40de-944b-e07fc1f90ae7"
+      }
     }
   ]
 }

@@ -4,8 +4,8 @@ info:
   version: 1.0.0
   summary: Write-only API for recording how people use internal tools.
   description: |
-    Clients (agents built into tools) send **events**, each describing something an end user did
-    with a tool. The server stores them in Postgres. There is no read API: reporting goes through
+    Clients (agents built into tools and clusters) send **events**, each describing something
+    that happened: a cluster created, an app deployed, a test suite run. The server stores them in Postgres. There is no read API: reporting goes through
     the database (Grafana dashboards).
 
     ## Delivery model
@@ -20,13 +20,19 @@ info:
     ## Event shape
     Every event has the same envelope (`event_id`, `type`, `occurred_at`, `username`, `source`)
     and a `data` object whose schema is chosen by `type`. Type names are dotted:
-    `<domain>.<entity>.<verb>`, e.g. `localdev.cluster.created`.
+    `<entity>.<verb>`, e.g. `cluster.created`.
+
+    ## Clusters
+    A cluster has a **type** (`localdev`: a developer's local cluster; `ephemeral`: short-lived, e.g.
+    per CI run; `durable`: long-lived, shared) and a **role** (`dev`, `test`, `stage`, `prod`,
+    `perftest`), both set in `cluster.created`. Other cluster events refer to their cluster by
+    `cluster_id` only.
 
     ## Versioning
     - **Additive changes keep v1:** a new event type (a new schema plus a discriminator mapping), or a
       new optional field.
     - **Breaking changes get a new name:** removing or renaming a field, or making one required,
-      requires a new type name (`localdev.cluster.created.v2`) or a `/v2` path.
+      requires a new type name (`cluster.created.v2`) or a `/v2` path.
     - The server rejects types it does not know (422). Clients keep such events spooled, so they are
       delivered once the server is upgraded.
   license:
@@ -63,30 +69,44 @@ paths:
               $ref: '#/components/schemas/EventBatch'
             examples:
               clusterLifecycle:
-                summary: A cluster created, an ad-hoc event, and the cluster destroyed
+                summary: A cluster created, a heartbeat, an ad-hoc event, and the cluster destroyed
                 value:
                   events:
                     - event_id: 0f8e6d2a-3b1c-4e5f-9a7b-1c2d3e4f5a6b
-                      type: localdev.cluster.created
+                      type: cluster.created
                       occurred_at: '2026-10-10T14:03:22Z'
                       username: alice
-                      source: {name: localdev-client, version: de78fa6}
+                      source: {name: localdev-cluster-agent, version: 0.2.0}
                       data:
                         cluster_id: 7c9e6679-7425-40de-944b-e07fc1f90ae7
-                        profile: dev
-                        components: [postgres, nats, docs]
+                        cluster_type: localdev
+                        cluster_role: dev
                         platform: k3d
                         platform_version: v5.9.0
-                        kubernetes_version: v1.33.4+k3s1
+                        kubernetes_version: v1.36.5+k3s1
+                        arch: amd64
+                        profile: dev
+                        components: [postgres, nats, docs]
                         os: windows
                         os_variant: wsl2
                         os_version: Ubuntu 24.04
-                        arch: amd64
+                    - event_id: 3c4d5e6f-7a8b-4c9d-8e0f-1a2b3c4d5e6f
+                      type: cluster.heartbeat
+                      occurred_at: '2026-10-10T14:18:22Z'
+                      username: alice
+                      source: {name: localdev-cluster-agent, version: 0.2.0}
+                      data:
+                        cluster_id: 7c9e6679-7425-40de-944b-e07fc1f90ae7
+                        nodes: 1
+                        cores: 8
+                        memory_bytes: 16777216000
+                        pods: 42
+                        namespaces: 14
                     - event_id: 5a1b2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d
-                      type: localdev.cluster.event
+                      type: cluster.event
                       occurred_at: '2026-10-10T14:20:05Z'
                       username: alice
-                      source: {name: localdev-client, version: de78fa6}
+                      source: {name: localdev-cluster-agent, version: 0.2.0}
                       data:
                         cluster_id: 7c9e6679-7425-40de-944b-e07fc1f90ae7
                         name: tests.run
@@ -94,7 +114,7 @@ paths:
                         duration_ms: 48210
                         attributes: {suite: smoke, passed: 42, failed: 0}
                     - event_id: 9d8c7b6a-5f4e-4d3c-8b2a-1f0e9d8c7b6a
-                      type: localdev.cluster.destroyed
+                      type: cluster.destroyed
                       occurred_at: '2026-10-10T17:45:00Z'
                       username: alice
                       source: {name: localdev-client, version: de78fa6}
@@ -135,7 +155,7 @@ paths:
                 message: 2 events are invalid
                 details:
                   - {index: 0, path: data.os, message: "'solaris' is not one of [linux, macos, windows]"}
-                  - {index: 3, path: type, message: "unknown event type 'localdev.cluster.paused'"}
+                  - {index: 3, path: type, message: "unknown event type 'cluster.paused'"}
         '503':
           description: The server cannot reach its database. Retry later.
           content:
@@ -196,15 +216,17 @@ components:
     Event:
       description: One usage event. `type` selects the schema.
       oneOf:
-        - $ref: '#/components/schemas/LocaldevClusterCreated'
-        - $ref: '#/components/schemas/LocaldevClusterDestroyed'
-        - $ref: '#/components/schemas/LocaldevClusterEvent'
+        - $ref: '#/components/schemas/ClusterCreated'
+        - $ref: '#/components/schemas/ClusterDestroyed'
+        - $ref: '#/components/schemas/ClusterEvent'
+        - $ref: '#/components/schemas/ClusterHeartbeat'
       discriminator:
         propertyName: type
         mapping:
-          localdev.cluster.created: '#/components/schemas/LocaldevClusterCreated'
-          localdev.cluster.destroyed: '#/components/schemas/LocaldevClusterDestroyed'
-          localdev.cluster.event: '#/components/schemas/LocaldevClusterEvent'
+          cluster.created: '#/components/schemas/ClusterCreated'
+          cluster.destroyed: '#/components/schemas/ClusterDestroyed'
+          cluster.event: '#/components/schemas/ClusterEvent'
+          cluster.heartbeat: '#/components/schemas/ClusterHeartbeat'
 
     BatchResult:
       type: object
@@ -234,8 +256,8 @@ components:
           description: Generated by the client, once per event. The idempotency key.
         type:
           type: string
-          pattern: '^[a-z][a-z0-9]*(\.[a-z][a-z0-9_]*){2,}$'
-          description: '`<domain>.<entity>.<verb>`. See the event schemas for the known types.'
+          pattern: '^[a-z][a-z0-9]*(\.[a-z][a-z0-9_]*)+$'
+          description: '`<entity>.<verb>`. See the event schemas for the known types.'
         occurred_at:
           type: string
           format: date-time
@@ -271,80 +293,105 @@ components:
     ClusterId:
       type: string
       format: uuid
-      description: Identifies one localdev cluster, from creation to destruction. Generated at `cluster:create`.
+      description: |
+        Identifies one cluster, from creation to destruction. For Kubernetes clusters, the UID of
+        the `kube-system` namespace.
+
+    ClusterType:
+      type: string
+      enum: [localdev, ephemeral, durable]
+      description: |
+        `localdev`: a developer's local cluster. `ephemeral`: short-lived (e.g. per CI run or
+        review app). `durable`: long-lived and shared.
+
+    ClusterRole:
+      type: string
+      enum: [dev, test, stage, prod, perftest]
+      description: What the cluster is used for.
 
     Version:
       type: string
       pattern: '^v?\d+\.\d+(\.\d+)?([-+][0-9A-Za-z.+-]+)?$'
       maxLength: 64
 
-    # ---------- localdev ----------
-    LocaldevClusterCreated:
-      title: localdev.cluster.created
-      description: A localdev cluster was created.
+    Count:
+      type: integer
+      minimum: 0
+
+    # ---------- clusters ----------
+    ClusterCreated:
+      title: cluster.created
+      description: |
+        A cluster was created. Sent once per cluster; the facts here are stored on the cluster and
+        not repeated by its other events. Fields marked *localdev* only apply to `localdev` clusters.
       allOf:
         - $ref: '#/components/schemas/EventEnvelope'
         - type: object
           properties:
             type:
-              const: localdev.cluster.created
+              const: cluster.created
             data:
               type: object
-              required: [cluster_id, profile, components, platform, platform_version, kubernetes_version, os, os_version, arch]
+              required: [cluster_id, cluster_type, cluster_role, platform, kubernetes_version]
               additionalProperties: false
               properties:
                 cluster_id:
                   $ref: '#/components/schemas/ClusterId'
+                cluster_type:
+                  $ref: '#/components/schemas/ClusterType'
+                cluster_role:
+                  $ref: '#/components/schemas/ClusterRole'
+                platform:
+                  type: string
+                  pattern: '^[a-z0-9][a-z0-9_-]{0,31}$'
+                  description: Kubernetes distribution or tool that runs the cluster.
+                  examples: [k3d, k3s, kind, eks, gke, aks]
+                platform_version:
+                  $ref: '#/components/schemas/Version'
+                kubernetes_version:
+                  $ref: '#/components/schemas/Version'
+                arch:
+                  type: string
+                  enum: [amd64, arm64]
                 profile:
                   type: string
                   pattern: '^[a-z0-9][a-z0-9_-]{0,63}$'
-                  description: Profile the cluster was created with.
+                  description: '*localdev*: profile the cluster was created with.'
                   examples: [dev, full]
                 components:
                   type: array
-                  description: Components enabled by the profile.
+                  description: '*localdev*: components enabled by the profile.'
                   maxItems: 100
                   uniqueItems: true
                   items:
                     type: string
                     pattern: '^[a-z0-9][a-z0-9_-]{0,63}$'
-                platform:
-                  type: string
-                  enum: [k3d]
-                  description: Kubernetes distribution or tool that runs the cluster.
-                platform_version:
-                  $ref: '#/components/schemas/Version'
-                kubernetes_version:
-                  $ref: '#/components/schemas/Version'
                 os:
                   type: string
                   enum: [linux, macos, windows]
-                  description: The user's operating system. WSL counts as `windows`.
+                  description: "*localdev*: the developer's operating system. WSL counts as `windows`."
                 os_variant:
                   type: string
                   maxLength: 64
-                  description: Refinement of `os`, such as `wsl2`, a Linux distribution id, or the macOS Docker runtime (`rancher-desktop`).
+                  description: '*localdev*: refinement of `os`, such as `wsl2`, a Linux distribution id, or the macOS Docker runtime (`rancher-desktop`).'
                   examples: [wsl2, ubuntu, fedora, rancher-desktop]
                 os_version:
                   type: string
                   minLength: 1
                   maxLength: 64
-                  description: Release of the OS (for `wsl2`, the Linux distribution inside it).
+                  description: '*localdev*: release of the OS (for `wsl2`, the Linux distribution inside it).'
                   examples: ['24.04', '15.6.1', 'Ubuntu 24.04']
-                arch:
-                  type: string
-                  enum: [amd64, arm64]
       unevaluatedProperties: false
 
-    LocaldevClusterDestroyed:
-      title: localdev.cluster.destroyed
-      description: A localdev cluster was destroyed.
+    ClusterDestroyed:
+      title: cluster.destroyed
+      description: A cluster was destroyed.
       allOf:
         - $ref: '#/components/schemas/EventEnvelope'
         - type: object
           properties:
             type:
-              const: localdev.cluster.destroyed
+              const: cluster.destroyed
             data:
               type: object
               required: [cluster_id]
@@ -354,8 +401,42 @@ components:
                   $ref: '#/components/schemas/ClusterId'
       unevaluatedProperties: false
 
-    LocaldevClusterEvent:
-      title: localdev.cluster.event
+    ClusterHeartbeat:
+      title: cluster.heartbeat
+      description: |
+        Periodic sign of life from a running cluster, with its size at that moment. Clusters can't
+        always report their own destruction, so the last heartbeat is when the cluster was last seen.
+      allOf:
+        - $ref: '#/components/schemas/EventEnvelope'
+        - type: object
+          properties:
+            type:
+              const: cluster.heartbeat
+            data:
+              type: object
+              required: [cluster_id, nodes, cores, memory_bytes, pods, namespaces]
+              additionalProperties: false
+              properties:
+                cluster_id:
+                  $ref: '#/components/schemas/ClusterId'
+                nodes:
+                  $ref: '#/components/schemas/Count'
+                cores:
+                  type: number
+                  minimum: 0
+                  description: CPU capacity summed over all nodes.
+                memory_bytes:
+                  type: integer
+                  minimum: 0
+                  description: Memory capacity summed over all nodes.
+                pods:
+                  $ref: '#/components/schemas/Count'
+                namespaces:
+                  $ref: '#/components/schemas/Count'
+      unevaluatedProperties: false
+
+    ClusterEvent:
+      title: cluster.event
       description: |
         An ad-hoc event attached to a cluster: an app deployed, a test suite run, a profile
         change. `name` says what happened, and `attributes` carries free-form details.
@@ -366,7 +447,7 @@ components:
         - type: object
           properties:
             type:
-              const: localdev.cluster.event
+              const: cluster.event
             data:
               type: object
               required: [cluster_id, name]
