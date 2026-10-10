@@ -31,7 +31,7 @@ Ephemeral local Kubernetes (k3d) with path-based routing on `http://localhost/<a
   sudo sysctl --system
   ```
   Docker Desktop and OrbStack on macOS and WSL2 run their own VM kernels, and usually already allow more.
-- **mise.** Run `mise install` in this directory to get k3d, kubectl, helm and k9s.
+- **mise.** Run `mise install` in this directory to get k3d, kubectl, kn and Python.
 - **`secrets.env` or `secrets.env.asc`**, from the Google OAuth setup below.
 
 ## Usage

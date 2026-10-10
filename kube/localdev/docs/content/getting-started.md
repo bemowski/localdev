@@ -3,7 +3,7 @@
 ## Prerequisites
 
 - **Docker**, and about 4 GB of RAM free for it.
-- **[mise](https://mise.jdx.dev)**: run `mise install` in `kube/localdev` to get k3d, kubectl, helm and k9s.
+- **[mise](https://mise.jdx.dev)**: run `mise install` in `kube/localdev` to get k3d, kubectl, kn and Python.
 - **Free host ports:** 80 (ingress), 5005 (image registry), and 5432 / 4222 (Postgres / NATS, on 127.0.0.1).
 - **`secrets.env`** (or the encrypted `secrets.env.asc`): the Google OAuth client and the local admin
   password. See the readme for the one-time Google setup.
