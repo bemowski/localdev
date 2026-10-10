@@ -67,7 +67,7 @@ at deployment time show up while the code is still being written.
     components; so is your app once you hook it in. See [Components](components.md).
 
 **Profile**
-:   A named set of components (`profiles.toml`): `lite`, `dev`, `knative`, `full`, or your own.
+:   A named set of components (`profiles.toml`): `lite`, `dev`, `knative`, `auth`, `full`, or your own.
     Switching profiles installs and uninstalls components on the running cluster.
 
 **Registry**

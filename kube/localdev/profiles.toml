@@ -17,6 +17,7 @@ default = "dev"
 lite    = { description = "Core only: SSO, observability, registry, cnav", components = [] }
 dev     = { description = "App development: Postgres + NATS + docs", components = ["postgres", "nats", "docs"] }
 knative = { description = "Serverless and eventing", components = ["postgres", "nats", "knative", "docs"] }
+auth    = { description = "Identity: Postgres + Keycloak + docs", components = ["postgres", "keycloak", "docs"] }
 full    = { description = "Everything", components = ["postgres", "nats", "knative", "keycloak", "docs"] }
 
 # Extra component metadata. Components themselves are discovered from components/*/.

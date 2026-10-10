@@ -117,6 +117,7 @@ A profile chooses which optional tools run. Platform, infra and apps always run.
 | `lite` | none | SSO, observability, registry, cnav |
 | `dev` (default) | postgres, nats, docs | app development |
 | `knative` | postgres, nats, knative, docs | serverless and eventing |
+| `auth` | postgres, keycloak, docs | identity (Keycloak) work |
 | `full` | postgres, nats, knative, keycloak, docs | everything |
 
 ```bash

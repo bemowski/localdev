@@ -40,7 +40,7 @@ Supported platforms: **Linux**, **macOS with Rancher Desktop** (Intel or Apple S
 
 ```bash
 # cluster lifecycle
-mise run cluster:create [profile]           # create cluster with a profile (lite|dev|knative|full), load secrets, build images
+mise run cluster:create [profile]           # create cluster with a profile (lite|dev|knative|auth|full), load secrets, build images
 mise run cluster:profile [profile]          # list profiles / switch the running cluster (adds/removes tools live)
 mise run cluster:status                     # profile, nodes, helm install jobs, ingresses
 mise run secrets:sync                       # (re)load secrets.store.toml into the secret store (cluster:secrets does the same)
@@ -288,7 +288,7 @@ A component's optional `docker/` folder holds application code and its Dockerfil
     - **Events (right)** lists cluster events, newest first: age, type, `namespace / component` and the message. Kubernetes drops events after an hour, so Alloy ships them to Loki (`loki.source.kubernetes_events` in `20-3-logging.yaml`), where they're kept for 72 hours in `runtime.data/loki` and survive `cluster:recreate`. cnav reads them from Loki and falls back to the Kubernetes API (the last hour) while Loki isn't answering; the header says which. The page polls with the rest (every 10 seconds), but each poll is cheap: cnav backfills the 72 hours once, keeps the collapsed rows in memory, and then asks Loki only for lines since the newest it has seen (with a 60-second overlap for late lines, deduplicated). It resyncs fully every 15 minutes.
       - **Type** comes from the event's reason: `crash` (back-off restarting, OOM, evicted) and `image` (pull failures) are red; `unhealthy` (probe failures, scheduling, mounts), `restart` (killed by a failed probe) and `warning` (any other Warning) are amber; `deploy` (replica sets scaled, k3s manifests applied, StatefulSet/Job pods created) is blue. A repeated event shows once, with `×N`.
       - **Component** is the workload name, with the generated pod and replica set suffixes stripped. It links to the object in Headlamp.
-      - Routine pod lifecycle events (scheduled, pulling, pulled, created, started, a normal rollout's stopped containers) are hidden; tick **all** to show them.
+      - Routine pod lifecycle events (scheduled, pulling, pulled, created, started, a normal rollout's stopped containers) are hidden; tick **all** to show them. **severe** shows only the red and amber rows (problems); the two exclude each other, and the page remembers your choice. The **↻** button refreshes the events now.
       - **Your own events:** post a plain Kubernetes Event, e.g. reason `Deployed` on your Deployment, and it shows up as `deploy`, in Headlamp too.
   - **Logs:** stdlib `logging`, one logfmt line per record (`ts=… level=info logger=cnav.http msg="…"`), so Grafana's Logs dashboard can filter by level. Status changes are logged once (turning red is a warning), API failures are errors with the traceback, and the page's own 10-second polling and probes only show at debug. Set the level with `CNAV_LOG_LEVEL` in `20-7-cnav.yaml`.
   - **Access:** the `cnav-status` ClusterRole gives read-only access to workloads, pods, jobs, HelmCharts, pod metrics, Services, EndpointSlices and events (the fallback).

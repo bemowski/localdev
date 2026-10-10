@@ -263,6 +263,9 @@ spec:
             - containerPort: 8080
           readinessProbe:
             httpGet: {path: /healthz, port: 8080}
+            # the server listens ~0.3s after start; probing at once fails (a Warning event per rollout)
+            initialDelaySeconds: 2
+            periodSeconds: 5
           volumeMounts:
             - name: config
               mountPath: /etc/cnav   # whole dir (not subPath) so ConfigMap edits propagate
