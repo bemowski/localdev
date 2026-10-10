@@ -1,5 +1,6 @@
 # Cluster navigator cards. Fields: component, icon (emoji), link, description (optional),
-#   links (optional): [{label, url}] shown as pills on the card, opening in a new tab
+#   links (optional): [{label, url, tool}] shown as pills on the card, opening in a new tab;
+#   url is absolute or a path on this host (/docs/); tool hides the pill when that component is off
 - component: Headlamp
   icon: 🔦
   link: /headlamp/

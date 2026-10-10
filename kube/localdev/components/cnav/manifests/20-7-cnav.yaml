@@ -17,6 +17,8 @@ data:
       icon: 🔦
       link: /headlamp/
       description: Kubernetes dashboard
+      links:
+        - {label: docs, url: /docs/, tool: docs}   # localdev docs; hidden when the docs component isn't installed
     - component: Grafana
       icon: 📊
       link: /grafana/
@@ -34,11 +36,6 @@ data:
       icon: 🐘
       link: /pgweb/
       description: Postgres (pg/postgres-rw), app database
-    - component: Docs
-      tool: docs
-      icon: 📚
-      link: /docs/
-      description: How localdev works, getting started, components
     - component: NATS
       tool: nats
       icon: 📨

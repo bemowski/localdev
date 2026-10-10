@@ -446,9 +446,12 @@ class Handler(SimpleHTTPRequestHandler):
         if path in ("/cards.yaml", "/status.yaml"):
             f = CONFIG_DIR / path.lstrip("/")
             data = f.read_bytes()
-            if path == "/cards.yaml":   # only cards for tools in the cluster's profile
-                cards = yaml.safe_load(data) or []
-                data = yaml.safe_dump(for_profile(cards), sort_keys=False, allow_unicode=True).encode()
+            if path == "/cards.yaml":   # only cards (and card links) for tools in the cluster's profile
+                cards = for_profile(yaml.safe_load(data) or [])
+                for c in cards:
+                    if isinstance(c, dict) and c.get("links"):
+                        c["links"] = for_profile(c["links"])
+                data = yaml.safe_dump(cards, sort_keys=False, allow_unicode=True).encode()
             self.send_response(200)
             self.send_header("Content-Type", "text/yaml; charset=utf-8")
             self.send_header("Cache-Control", "no-store")
