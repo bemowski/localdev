@@ -186,7 +186,7 @@
   .dot.red { background: var(--red); box-shadow: 0 0 0 3px color-mix(in srgb, var(--red) 25%, transparent); }
 
   /* row under the cards: ports (left) | events (right), each about a quarter of the screen high */
-  .dock { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-top: 24px; }   /* full width of main, unlike the cards */
+  .dock { display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 3fr); gap: 16px; margin-top: 24px; }   /* full width of main, unlike the cards; events get more */
   .dock-col {
     min-width: 0; height: 25vh; min-height: 180px; overflow-y: auto; padding: 14px 18px 16px;
     background: var(--card); border: 1px solid var(--border); border-radius: 12px; box-shadow: var(--shadow);
@@ -219,11 +219,16 @@
   .dock-toggle input { margin: 0; accent-color: var(--accent); }
   .dock-toggle:has(input:checked) { border-color: var(--accent); color: var(--accent); }
   .events { width: 100%; border-collapse: collapse; font-size: 13px; }
-  .events td { padding: 5px 8px; border-top: 1px solid var(--border); vertical-align: top; }
+  .events td { padding: 5px 6px; border-top: 1px solid var(--border); vertical-align: top; }
+  .events td:first-child { padding-left: 0; }
+  .events td.msgcell { width: 100%; padding-right: 0; }   /* the message takes whatever the others leave */
   .events tr:first-child td { border-top: 0; }
   .events .age { white-space: nowrap; width: 1%; font: 12px ui-monospace, SFMono-Regular, Menlo, monospace; color: var(--muted); }
   .events .kind { white-space: nowrap; width: 1%; }
   .events .comp { white-space: nowrap; width: 1%; }
+  .events .comp > * {   /* long names are cut (full name in the tooltip) so the message keeps its room */
+    display: inline-block; max-width: 220px; overflow: hidden; text-overflow: ellipsis; vertical-align: top;
+  }
   .events .comp a { color: inherit; text-decoration: none; }
   .events .comp a:hover { color: var(--accent); }
   .events .ns { color: var(--muted); font: 12px ui-monospace, SFMono-Regular, Menlo, monospace; }
@@ -558,7 +563,7 @@
       if (e.namespace) target.append(el('span', 'ns', e.namespace));
       target.append(document.createTextNode(e.component || e.name || ''));
       comp.append(target);
-      const msg = el('td');
+      const msg = el('td', 'msgcell');
       const text = el('div', 'msg', e.message);
       text.title = `${e.reason}: ${e.message}`;
       msg.append(text);

@@ -19,7 +19,7 @@ LOCALDEV_ROOT = "{{config_root}}"            # expanded in k3d.yaml (absolute ho
 
 [tasks."cluster:create"]
 description = "Create the localdev k3d cluster with a profile (default: last used, else profiles.toml default)"
-usage = 'arg "[profile]" help="lite | dev | knative | full (see profiles.toml)"'
+usage = 'arg "[profile]" help="lite | dev | knative | auth | full (see profiles.toml)"'
 run = """#!/bin/bash
 set -euo pipefail
 

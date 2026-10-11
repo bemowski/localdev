@@ -23,6 +23,9 @@ data:
       icon: 📊
       link: /grafana/
       description: Dashboards, metrics and logs
+      links:
+        # deep link: the Logs dashboard (grafana/dashboards/logs.json), every namespace and service, last hour
+        - {label: logs, url: "/grafana/d/localdev-logs/logs?from=now-1h&to=now&var-namespace=$__all&var-service=$__all"}
     - component: Prometheus
       icon: 🔥
       link: /prometheus/
