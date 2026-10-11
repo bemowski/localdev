@@ -51,12 +51,15 @@ Every event has the envelope `event_id, type, occurred_at, username, source{name
 
 | type | data |
 |---|---|
-| `cluster.created` | `cluster_id, cluster_type (localdev/ephemeral/durable), cluster_role (dev/test/stage/prod/perftest), platform (k3d, eks, ...), kubernetes_version`; optional `platform_version, arch`, and for localdev `profile, components[], os, os_variant, os_version` |
+| `cluster.created` | `cluster_id, cluster_type (localdev/ephemeral/durable/unknown), cluster_role (dev/test/stage/prod/perftest/unknown), platform (k3d, eks, ...), kubernetes_version`; optional `platform_version, arch`, and for localdev `profile, components[], os, os_variant, os_version` |
+| `cluster.updated` | `cluster_id` plus any of the facts above (not profile/components): the ones sent replace the stored ones. Username `unknown` never replaces a known one |
 | `cluster.heartbeat` | `cluster_id, nodes, cores, memory_bytes, pods, namespaces` (capacity summed over nodes) |
 | `cluster.event` | `cluster_id, name (e.g. tests.run), outcome? (success/failure/cancelled), duration_ms?, attributes? (flat, ≤50 keys)` |
 | `cluster.destroyed` | `cluster_id` |
 
-Cluster facts are sent once, in `cluster.created`. The other cluster events only carry `cluster_id`.
+Cluster facts are sent in `cluster.created`. Facts the sender doesn't know yet are `unknown` (type,
+role, username) or left out (optional ones), and `cluster.updated` fills them in later. The other
+cluster events only carry `cluster_id`.
 
 ## Server (`server/`)
 
@@ -66,7 +69,7 @@ can't drift from the spec. Each batch is written in one transaction:
 - **Typed projections** are filled by handlers in `store.py`, normalized on `cluster_id`:
   - `clusters`: one row per cluster, with type, role, platform, versions, the localdev facts,
     `created_at`, `destroyed_at` and `last_seen_at` (the latest event of any kind). It comes out
-    right whatever order events arrive in.
+    right whatever order events arrive in. `cluster.updated` patches the facts it carries.
   - `cluster_events`: ad-hoc events (`app.deployed`, `tests.run`, ...).
   - `cluster_heartbeats`: one row per heartbeat, with the size stats.
 - Duplicates are skipped before projection, so retries never double-count.
@@ -100,12 +103,8 @@ path = "../components/usage/server"
 requires = ["postgres"]
 layer = "apps"
 
-[components.usage-agent]
-path = "../components/usage/cluster-agent"
-layer = "infra"
-
 [profiles]
-usage = { description = "dev + usage server + agent", components = ["postgres", "nats", "docs", "usage", "usage-agent"] }
+usage = { description = "dev + the usage server", components = ["postgres", "nats", "docs", "usage"] }
 ```
 
 Then `mise run cluster:profile usage` (or `cluster:create usage`). `mise run cluster:profile dev` removes it.
@@ -119,6 +118,7 @@ events to `USAGE_URL` (default `http://usage.usage.svc`, set in the manifest). I
 | event | when |
 |---|---|
 | `cluster.created` | once per cluster. `cluster_id` is the `kube-system` namespace UID, `occurred_at` its creation time |
+| `cluster.updated` | when the facts change or become known (the backfill), and once at start with the known facts (its id comes from the facts, so the server drops it if nothing changed) |
 | `cluster.heartbeat` | at start and every 15 min, with nodes, cores, memory, pods and namespaces. The agent dies with the cluster, so it can't send `destroyed`; heartbeats give "last seen" |
 | `cluster.event` `profile.changed` | `cnav/localdev-profile` changes (profile or components) |
 | `cluster.event` `app.deployed` | a Deployment in a user namespace is created or changed (new generation). User namespaces are those not created by localdev's manifests (no `objectset.rio.cattle.io/hash` label) and not `kube-*` |
@@ -130,15 +130,21 @@ events to `USAGE_URL` (default `http://usage.usage.svc`, set in the manifest). I
     version. Profile and components come from `cnav/localdev-profile`.
   - On other clusters: `CLUSTER_TYPE`, `CLUSTER_ROLE`, `CLUSTER_USERNAME` and `CLUSTER_PLATFORM` env.
     The platform is otherwise guessed from the kubelet version.
-  - Until a cluster type is known, the agent sends nothing.
+  - **Best effort:** anything still missing is `unknown` (optional facts are left out), and the agent
+    starts sending right away. When the ConfigMap appears or changes later, the next poll sends
+    `cluster.updated` with what changed. Known facts are sticky: the ConfigMap going away doesn't turn
+    them back into `unknown`, and a guessed platform never replaces a reported one.
 - **Best-effort delivery:** one file per event in an `emptyDir` spool, POSTed in batches every 30 s.
   - 5xx or unreachable: kept and retried.
   - 422: only the rejected events are dropped.
   - The spool is capped at 1000 files and 3 days.
 - **Restarts are harmless:** created and app events have ids derived from the cluster id (uuid5), so
   a restarted agent resends them and the server counts them as duplicates.
-- **Deploy:** in `kube/localdev/local.toml`, `[components.usage-agent] path = "../components/usage/cluster-agent"`,
-  `layer = "infra"`, and add `usage-agent` to your profile. `mise run build usage-agent` rebuilds it.
+- **Deploy:** always on in every localdev cluster: `kube/localdev/profiles.toml` declares
+  `[components.usage-agent]` (`path`, `layer = "infra"`, `always = true`). With no usage server it
+  spools (and logs one warning). `USAGE_URL` in the manifest points at the in-cluster server for now;
+  a public endpoint later. `mise run build usage-agent` rebuilds it. For other clusters, a Helm chart
+  (published to an OCI registry) is the planned next step.
 - **Tests:** `cd cluster-agent && mise run test` (unittest, plus a contract test of every event against `openapi.yaml`).
 
 ## Adding an event type

@@ -32,6 +32,11 @@ requires = ["postgres"]
 layer = "infra"                # deploy with infra, before the tools
 always = true
 
+[components.usage-agent]
+path = "../components/usage/cluster-agent"   # external: lives with the usage project (kube/components/usage)
+layer = "infra"                              # kube-system; sends this cluster's usage events
+always = true                                # every profile, with or without a usage server (it spools)
+
 [components.external-secrets]
 layer = "infra"                # apps' ExternalSecrets need it; local store: secrets.store.toml
 always = true

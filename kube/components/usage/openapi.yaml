@@ -217,6 +217,7 @@ components:
       description: One usage event. `type` selects the schema.
       oneOf:
         - $ref: '#/components/schemas/ClusterCreated'
+        - $ref: '#/components/schemas/ClusterUpdated'
         - $ref: '#/components/schemas/ClusterDestroyed'
         - $ref: '#/components/schemas/ClusterEvent'
         - $ref: '#/components/schemas/ClusterHeartbeat'
@@ -224,6 +225,7 @@ components:
         propertyName: type
         mapping:
           cluster.created: '#/components/schemas/ClusterCreated'
+          cluster.updated: '#/components/schemas/ClusterUpdated'
           cluster.destroyed: '#/components/schemas/ClusterDestroyed'
           cluster.event: '#/components/schemas/ClusterEvent'
           cluster.heartbeat: '#/components/schemas/ClusterHeartbeat'
@@ -299,15 +301,16 @@ components:
 
     ClusterType:
       type: string
-      enum: [localdev, ephemeral, durable]
+      enum: [localdev, ephemeral, durable, unknown]
       description: |
         `localdev`: a developer's local cluster. `ephemeral`: short-lived (e.g. per CI run or
-        review app). `durable`: long-lived and shared.
+        review app). `durable`: long-lived and shared. `unknown`: not reported (yet); a later
+        `cluster.updated` may fill it in.
 
     ClusterRole:
       type: string
-      enum: [dev, test, stage, prod, perftest]
-      description: What the cluster is used for.
+      enum: [dev, test, stage, prod, perftest, unknown]
+      description: 'What the cluster is used for. `unknown`: not reported (yet), see `ClusterType`.'
 
     Version:
       type: string
@@ -318,12 +321,42 @@ components:
       type: integer
       minimum: 0
 
+    Platform:
+      type: string
+      pattern: '^[a-z0-9][a-z0-9_-]{0,31}$'
+      description: Kubernetes distribution or tool that runs the cluster.
+      examples: [k3d, k3s, kind, eks, gke, aks]
+
+    Arch:
+      type: string
+      enum: [amd64, arm64]
+
+    Os:
+      type: string
+      enum: [linux, macos, windows]
+      description: "*localdev*: the developer's operating system. WSL counts as `windows`."
+
+    OsVariant:
+      type: string
+      maxLength: 64
+      description: '*localdev*: refinement of `os`, such as `wsl2`, a Linux distribution id, or the macOS Docker runtime (`rancher-desktop`).'
+      examples: [wsl2, ubuntu, fedora, rancher-desktop]
+
+    OsVersion:
+      type: string
+      minLength: 1
+      maxLength: 64
+      description: '*localdev*: release of the OS (for `wsl2`, the Linux distribution inside it).'
+      examples: ['24.04', '15.6.1', 'Ubuntu 24.04']
+
     # ---------- clusters ----------
     ClusterCreated:
       title: cluster.created
       description: |
         A cluster was created. Sent once per cluster; the facts here are stored on the cluster and
         not repeated by its other events. Fields marked *localdev* only apply to `localdev` clusters.
+        Facts the sender doesn't know yet are `unknown` (type, role) or left out (optional fields);
+        `cluster.updated` fills them in later.
       allOf:
         - $ref: '#/components/schemas/EventEnvelope'
         - type: object
@@ -342,17 +375,13 @@ components:
                 cluster_role:
                   $ref: '#/components/schemas/ClusterRole'
                 platform:
-                  type: string
-                  pattern: '^[a-z0-9][a-z0-9_-]{0,31}$'
-                  description: Kubernetes distribution or tool that runs the cluster.
-                  examples: [k3d, k3s, kind, eks, gke, aks]
+                  $ref: '#/components/schemas/Platform'
                 platform_version:
                   $ref: '#/components/schemas/Version'
                 kubernetes_version:
                   $ref: '#/components/schemas/Version'
                 arch:
-                  type: string
-                  enum: [amd64, arm64]
+                  $ref: '#/components/schemas/Arch'
                 profile:
                   type: string
                   pattern: '^[a-z0-9][a-z0-9_-]{0,63}$'
@@ -367,20 +396,52 @@ components:
                     type: string
                     pattern: '^[a-z0-9][a-z0-9_-]{0,63}$'
                 os:
-                  type: string
-                  enum: [linux, macos, windows]
-                  description: "*localdev*: the developer's operating system. WSL counts as `windows`."
+                  $ref: '#/components/schemas/Os'
                 os_variant:
-                  type: string
-                  maxLength: 64
-                  description: '*localdev*: refinement of `os`, such as `wsl2`, a Linux distribution id, or the macOS Docker runtime (`rancher-desktop`).'
-                  examples: [wsl2, ubuntu, fedora, rancher-desktop]
+                  $ref: '#/components/schemas/OsVariant'
                 os_version:
-                  type: string
-                  minLength: 1
-                  maxLength: 64
-                  description: '*localdev*: release of the OS (for `wsl2`, the Linux distribution inside it).'
-                  examples: ['24.04', '15.6.1', 'Ubuntu 24.04']
+                  $ref: '#/components/schemas/OsVersion'
+      unevaluatedProperties: false
+
+    ClusterUpdated:
+      title: cluster.updated
+      description: |
+        Facts about a cluster changed or became known, e.g. a cluster that reported `unknown` in
+        `cluster.created` because its facts weren't available yet. The fields sent replace the
+        stored ones; fields left out stay as they are. The envelope's `username` becomes the
+        cluster's username, unless it is `unknown`. Sending the same facts again is harmless.
+      allOf:
+        - $ref: '#/components/schemas/EventEnvelope'
+        - type: object
+          properties:
+            type:
+              const: cluster.updated
+            data:
+              type: object
+              required: [cluster_id]
+              minProperties: 2
+              additionalProperties: false
+              properties:
+                cluster_id:
+                  $ref: '#/components/schemas/ClusterId'
+                cluster_type:
+                  $ref: '#/components/schemas/ClusterType'
+                cluster_role:
+                  $ref: '#/components/schemas/ClusterRole'
+                platform:
+                  $ref: '#/components/schemas/Platform'
+                platform_version:
+                  $ref: '#/components/schemas/Version'
+                kubernetes_version:
+                  $ref: '#/components/schemas/Version'
+                arch:
+                  $ref: '#/components/schemas/Arch'
+                os:
+                  $ref: '#/components/schemas/Os'
+                os_variant:
+                  $ref: '#/components/schemas/OsVariant'
+                os_version:
+                  $ref: '#/components/schemas/OsVersion'
       unevaluatedProperties: false
 
     ClusterDestroyed:

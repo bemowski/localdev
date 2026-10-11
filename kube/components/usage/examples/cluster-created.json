@@ -44,6 +44,23 @@
         "platform": "eks",
         "kubernetes_version": "v1.35.2"
       }
+    },
+    {
+      "event_id": "3c4d5e6f-7a8b-4c9d-8e0f-1a2b3c4d5e6f",
+      "type": "cluster.created",
+      "occurred_at": "2026-10-11T08:00:00Z",
+      "username": "unknown",
+      "source": {
+        "name": "localdev-cluster-agent",
+        "version": "0.3.0"
+      },
+      "data": {
+        "cluster_id": "4d5e6f7a-8b9c-4d0e-9f1a-2b3c4d5e6f7a",
+        "cluster_type": "unknown",
+        "cluster_role": "unknown",
+        "platform": "k3s",
+        "kubernetes_version": "v1.36.5+k3s1"
+      }
     }
   ]
 }

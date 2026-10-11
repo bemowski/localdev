@@ -27,15 +27,16 @@ def test_batch_is_stored_and_projected(client, db):
     batch = with_cluster(fresh(example("batch.json")), cluster_id)
     r = client.post("/v1/events", json=batch)
     assert r.status_code == 202
-    assert r.json() == {"accepted": 5, "duplicates": 0}
+    assert r.json() == {"accepted": 6, "duplicates": 0}
 
     ids = [ev["event_id"] for ev in batch["events"]]
-    assert db.execute("SELECT count(*) FROM events WHERE event_id = ANY(%s::uuid[])", (ids,)).fetchone()[0] == 5
+    assert db.execute("SELECT count(*) FROM events WHERE event_id = ANY(%s::uuid[])", (ids,)).fetchone()[0] == 6
 
     row = db.execute("SELECT cluster_type, cluster_role, username, platform, profile, components, os, os_variant,"
                      " kubernetes_version, created_at IS NOT NULL, destroyed_at IS NOT NULL, last_seen_at"
                      " FROM clusters WHERE cluster_id = %s", (cluster_id,)).fetchone()
-    assert row[:11] == ("localdev", "dev", "alice", "k3d", "dev", ["postgres", "nats", "docs"], "windows", "wsl2",
+    # cluster_role: "test" from the cluster.updated after cluster.created
+    assert row[:11] == ("localdev", "test", "alice", "k3d", "dev", ["postgres", "nats", "docs"], "windows", "wsl2",
                         "v1.36.5+k3s1", True, True)
     assert row[11].isoformat() == "2026-10-10T19:25:41+00:00"   # latest event: app.deployed (14:25:41-05:00)
 
@@ -64,6 +65,45 @@ def test_non_localdev_cluster(client, db):
     row = db.execute("SELECT cluster_type, cluster_role, platform, platform_version, profile, os"
                      " FROM clusters WHERE cluster_id = %s", (cluster_id,)).fetchone()
     assert row == ("durable", "prod", "eks", None, None, None)
+
+
+def test_unknown_facts_then_updated(client, db):
+    """A cluster that didn't know its facts at creation, filled in later by cluster.updated."""
+    created = fresh(example("cluster-created.json"))
+    created["events"] = created["events"][2:]   # cluster_type/role unknown, username unknown
+    cluster_id = created["events"][0]["data"]["cluster_id"] = str(uuid.uuid4())
+    assert client.post("/v1/events", json=created).status_code == 202
+    row = db.execute("SELECT cluster_type, cluster_role, username, platform FROM clusters WHERE cluster_id = %s",
+                     (cluster_id,)).fetchone()
+    assert row == ("unknown", "unknown", "unknown", "k3s")
+
+    updated = with_cluster(fresh(example("cluster-updated.json")), cluster_id)
+    assert client.post("/v1/events", json=updated).json() == {"accepted": 1, "duplicates": 0}
+    row = db.execute("SELECT cluster_type, cluster_role, username, platform, os, os_variant, os_version"
+                     " FROM clusters WHERE cluster_id = %s", (cluster_id,)).fetchone()
+    # sent: replaced; not sent (platform): kept
+    assert row == ("localdev", "dev", "alice", "k3s", "windows", "wsl2", "Ubuntu 24.04")
+
+
+def test_unknown_username_keeps_the_known_one(client, db):
+    cluster_id = str(uuid.uuid4())
+    client.post("/v1/events", json=with_cluster(fresh(example("cluster-updated.json")), cluster_id))   # alice
+    anon = with_cluster(fresh(example("cluster-updated.json")), cluster_id)
+    anon["events"][0]["username"] = "unknown"
+    anon["events"][0]["data"]["cluster_role"] = "test"
+    assert client.post("/v1/events", json=anon).status_code == 202
+    row = db.execute("SELECT username, cluster_role FROM clusters WHERE cluster_id = %s", (cluster_id,)).fetchone()
+    assert row == ("alice", "test")
+
+
+def test_updated_before_created(client, db):
+    """Spooled clients may deliver out of order: an update alone still makes the cluster row."""
+    cluster_id = str(uuid.uuid4())
+    assert client.post("/v1/events", json=with_cluster(fresh(example("cluster-updated.json")), cluster_id)
+                       ).status_code == 202
+    row = db.execute("SELECT cluster_type, username, created_at FROM clusters WHERE cluster_id = %s",
+                     (cluster_id,)).fetchone()
+    assert row == ("localdev", "alice", None)
 
 
 def test_last_seen_only_moves_forward(client, db):

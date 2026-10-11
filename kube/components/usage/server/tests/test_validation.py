@@ -19,6 +19,7 @@ EXPECTED = {
     "nested-attribute.json": (0, "data.attributes.nested"),
     "unknown-envelope-field.json": (0, ""),
     "unknown-type.json": (0, "type"),
+    "updated-nothing.json": (0, "data"),
 }
 
 
@@ -41,7 +42,7 @@ def test_invalid_examples_point_at_the_problem(name):
 
 
 def test_errors_carry_each_bad_events_index():
-    batch = example("batch.json")  # created, heartbeat, tests.run, app.deployed, destroyed
+    batch = example("batch.json")  # created, heartbeat, tests.run, app.deployed, updated, destroyed
     batch["events"][2]["data"]["outcome"] = "maybe"
     batch["events"][4]["username"] = ""
     details = validator.errors(batch)

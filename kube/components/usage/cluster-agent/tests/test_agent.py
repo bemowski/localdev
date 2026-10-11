@@ -88,7 +88,7 @@ class PollTests(unittest.TestCase):
         a, spool, _ = make_agent(self.tmp)
         a.poll()
         events = spooled(spool)
-        self.assertEqual(names(events), ["cluster.created", "app.deployed", "cluster.heartbeat"])
+        self.assertEqual(names(events), ["cluster.created", "cluster.updated", "app.deployed", "cluster.heartbeat"])
         created = events[0]
         self.assertEqual(created["event_id"], agent.event_id(CLUSTER_ID, "created"))
         self.assertEqual(created["occurred_at"], "2026-10-10T20:51:43Z")
@@ -98,8 +98,8 @@ class PollTests(unittest.TestCase):
         self.assertEqual(d["components"], ["docs", "nats", "postgres"])
         self.assertEqual(d["kubernetes_version"], "v1.36.5+k3s1")
         self.assertEqual(d["os_variant"], "wsl2")
-        self.assertEqual(events[1]["data"]["attributes"]["name"], "web")   # only the user namespace
-        beat = events[2]["data"]
+        self.assertEqual(events[2]["data"]["attributes"]["name"], "web")   # only the user namespace
+        beat = events[3]["data"]
         self.assertEqual(beat, {"cluster_id": CLUSTER_ID, "nodes": 2, "cores": 25.5,
                                 "memory_bytes": 32486696 * 1024 + 2 * 2**30, "pods": 7, "namespaces": 4})
 
@@ -109,23 +109,67 @@ class PollTests(unittest.TestCase):
         del kube.objects["/api/v1/namespaces/kube-system/configmaps/localdev-host"]
         del kube.objects["/api/v1/namespaces/cnav/configmaps/localdev-profile"]
         a, spool, _ = make_agent(self.tmp, kube)
-        a.cfg.cluster_type, a.cfg.cluster_role = "durable", "prod"
+        a.cfg.cluster_type, a.cfg.cluster_role, a.cfg.cluster_username = "durable", "prod", "ops"
         a.poll()
         created = spooled(spool)[0]
-        self.assertEqual(created["username"], "system")
+        self.assertEqual(created["username"], "ops")
         self.assertEqual(created["data"], {"cluster_id": CLUSTER_ID, "cluster_type": "durable",
                                            "cluster_role": "prod", "platform": "k3s",
                                            "kubernetes_version": "v1.36.5+k3s1", "arch": "amd64"})
 
-    def test_nothing_until_host_configmap_exists(self):
+    def test_unknown_right_away_then_backfill(self):
+        """No ConfigMap, no env: everything is sent at once with unknown facts; when the ConfigMap
+        shows up, one cluster.updated carries what changed, and nothing more after that."""
         kube = FakeKube()
         del kube.objects["/api/v1/namespaces/kube-system/configmaps/localdev-host"]
         a, spool, _ = make_agent(self.tmp, kube)
         a.poll()
-        self.assertEqual(len(spool), 0)
+        events = spooled(spool)
+        self.assertEqual(names(events), ["cluster.created", "cluster.updated", "app.deployed", "cluster.heartbeat"])
+        created, start_update = events[0], events[1]
+        self.assertEqual(created["username"], "unknown")
+        self.assertEqual((created["data"]["cluster_type"], created["data"]["cluster_role"]), ("unknown", "unknown"))
+        # the start-up update carries only known facts: no unknown ones, no guessed platform
+        self.assertNotIn("cluster_type", start_update["data"])
+        self.assertNotIn("platform", start_update["data"])
+        self.assertEqual(start_update["data"]["kubernetes_version"], "v1.36.5+k3s1")
+
+        before = len(spool)
         kube.objects["/api/v1/namespaces/kube-system/configmaps/localdev-host"] = {"data": dict(HOST)}
         a.poll()
-        self.assertIn("cluster.created", names(spooled(spool)))
+        [update] = spooled(spool)[before:]
+        self.assertEqual(update["type"], "cluster.updated")
+        self.assertEqual(update["username"], "alice")
+        self.assertEqual(update["data"], {"cluster_id": CLUSTER_ID, "cluster_type": "localdev",
+                                          "cluster_role": "perftest", "platform": "k3d",
+                                          "platform_version": "v5.9.0", "os": "windows", "os_variant": "wsl2",
+                                          "os_version": "Ubuntu 24.04"})
+        later = len(spool)
+        a.poll()
+        self.assertEqual(len(spool), later)   # same facts: nothing new
+
+    def test_known_facts_are_sticky(self):
+        """The ConfigMap going away doesn't turn known facts back into unknown."""
+        kube = FakeKube()
+        a, spool, _ = make_agent(self.tmp, kube)
+        a.poll()
+        before = len(spool)
+        del kube.objects["/api/v1/namespaces/kube-system/configmaps/localdev-host"]
+        a.poll()
+        self.assertEqual(spooled(spool)[before:], [])
+        hb = [e for e in spooled(spool) if e["type"] == "cluster.event"]
+        self.assertTrue(all(e["username"] == "alice" for e in hb))
+
+    def test_restart_with_changed_facts_sends_a_new_update(self):
+        a1, s1, _ = make_agent(self.tmp)
+        a1.poll()
+        kube = FakeKube()
+        kube.objects["/api/v1/namespaces/kube-system/configmaps/localdev-host"]["data"]["cluster_role"] = "test"
+        a2, s2, _ = make_agent(tempfile.mkdtemp(), kube)
+        a2.poll()
+        upd = lambda s: [e for e in spooled(s) if e["type"] == "cluster.updated"][0]
+        self.assertNotEqual(upd(s1)["event_id"], upd(s2)["event_id"])   # the server applies it
+        self.assertEqual(upd(s2)["data"]["cluster_role"], "test")
 
     def test_later_polls_only_emit_changes(self):
         kube = FakeKube()
@@ -277,11 +321,18 @@ class ContractTest(unittest.TestCase):
         a.poll()
         kube.objects["/api/v1/namespaces/cnav/configmaps/localdev-profile"]["data"]["profile"] = "usage"
         kube.objects["/api/v1/namespaces/cnav/configmaps/localdev-profile"]["metadata"]["resourceVersion"] = "2"
-        kube.objects["/api/v1/namespaces/kube-system/configmaps/localdev-host"]["data"].pop("os_variant")
+        kube.objects["/api/v1/namespaces/kube-system/configmaps/localdev-host"]["data"]["cluster_role"] = "test"
         a.poll()
-        events = spooled(spool)
-        self.assertEqual(set(names(events)),
-                         {"cluster.created", "app.deployed", "cluster.heartbeat", "profile.changed"})
+        # and a cluster with nothing known: unknown facts, then a username-only backfill
+        kube2 = FakeKube()
+        del kube2.objects["/api/v1/namespaces/kube-system/configmaps/localdev-host"]
+        b, spool2, _ = make_agent(tempfile.mkdtemp(), kube2)
+        b.poll()
+        kube2.objects["/api/v1/namespaces/kube-system/configmaps/localdev-host"] = {"data": {"username": "bob"}}
+        b.poll()
+        events = spooled(spool) + spooled(spool2)
+        self.assertEqual(set(names(events)), {"cluster.created", "cluster.updated", "app.deployed",
+                                              "cluster.heartbeat", "profile.changed"})
         errors = [f"{list(e.absolute_path)}: {e.message}" for e in validator.iter_errors({"events": events})]
         self.assertEqual(errors, [])
 

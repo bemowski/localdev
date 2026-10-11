@@ -1,7 +1,10 @@
 # usage cluster-agent: watches this cluster and sends usage events (cluster created, heartbeat
 # with cluster size, profile changed, app deployed) to a usage server. Best-effort: events spool in an emptyDir.
+# Always on in localdev (profiles.toml), whether or not a usage server is running: without one, events
+# wait in the spool (72h / 1000 files) and the agent logs one warning.
 #   build: mise run build usage-agent      code: kube/components/usage/cluster-agent/docker/agent.py
-#   needs: ConfigMap kube-system/localdev-host (host facts), written by localdev's tasks
+#   optional: ConfigMap kube-system/localdev-host (host facts, written by localdev's tasks). Without it
+#   the facts are "unknown"; cluster.updated backfills them when it appears.
 apiVersion: v1
 kind: ServiceAccount
 metadata:
@@ -60,7 +63,8 @@ spec:
           image: localdev-registry:5005/usage-agent:latest
           imagePullPolicy: Always
           env:
-            - {name: USAGE_URL, value: "http://usage.usage.svc"}   # where a usage server runs
+            # where a usage server runs: the in-cluster one (usage component) for now; later a public endpoint
+            - {name: USAGE_URL, value: "http://usage.usage.svc"}
           volumeMounts:
             - {name: spool, mountPath: /spool}
           resources:

@@ -107,6 +107,23 @@ async def _cluster_created(conn: AsyncConnection, ev: dict):
          ev["event_id"], d["cluster_id"]))
 
 
+# cluster.updated may set these; the column names come from this list, never from the request
+UPDATABLE = ("cluster_type", "cluster_role", "platform", "platform_version", "kubernetes_version", "arch",
+             "os", "os_variant", "os_version")
+
+
+async def _cluster_updated(conn: AsyncConnection, ev: dict):
+    """Patch the cluster: the facts sent replace the stored ones, the rest stay."""
+    d = ev["data"]
+    await _touch_cluster(conn, ev)
+    cols = [c for c in UPDATABLE if c in d]
+    # username "unknown" (the sender doesn't know it) never replaces a known one
+    assignments = ", ".join([f"{c} = %s" for c in cols]
+                            + ["username = CASE WHEN %s = 'unknown' THEN username ELSE %s END"])
+    await conn.execute(f"UPDATE clusters SET {assignments} WHERE cluster_id = %s",
+                       [d[c] for c in cols] + [ev["username"], ev["username"], d["cluster_id"]])
+
+
 async def _cluster_destroyed(conn: AsyncConnection, ev: dict):
     await _touch_cluster(conn, ev)
     await conn.execute(
@@ -138,6 +155,7 @@ async def _cluster_heartbeat(conn: AsyncConnection, ev: dict):
 
 HANDLERS = {
     "cluster.created": _cluster_created,
+    "cluster.updated": _cluster_updated,
     "cluster.destroyed": _cluster_destroyed,
     "cluster.event": _cluster_event,
     "cluster.heartbeat": _cluster_heartbeat,

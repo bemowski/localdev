@@ -3,7 +3,8 @@
 
 profiles.toml names which optional components (components/<name>/) a cluster runs. local.toml
 (gitignored, same format) adds a developer's own profiles and EXTERNAL components - folders in other
-projects: [components.<name>] path = "../../../myapp/localdev". This tool builds runtime.profile/, the
+projects: [components.<name>] path = "../../../myapp/localdev" (profiles.toml may declare shared external
+components the same way, e.g. the usage agent). This tool builds runtime.profile/, the
 "active view" the cluster reads - links, so edits to the real files stay live:
 
   runtime.profile/name          current profile
@@ -217,7 +218,7 @@ def cmd_list(_):
         print(f" {mark} {name:9} {p.get('description', '')}{dflt}\n             [{', '.join(comps) or 'no tools'}]")
     external = [c for c in components_on_disk() if external_path(c)]
     if external:
-        print("   external components (local.toml):")
+        print("   external components (a path in profiles.toml / local.toml):")
         for c in external:
             print(f"     {c:12} {component_dir(c)}  ({'linked' if linkable(c) else 'copied: outside the workspace'})")
 
@@ -268,7 +269,7 @@ def cmd_check(_):
     for c, m in cfg.get("components", {}).items():
         if m.get("path"):
             if (COMPONENTS / c).exists():
-                problems.append(f"local.toml component '{c}' clashes with components/{c}/ (pick another name)")
+                problems.append(f"external component '{c}' clashes with components/{c}/ (pick another name)")
             elif not (external_path(c) / "manifests").is_dir():
                 problems.append(f"[components.{c}] path {external_path(c)} has no manifests/ folder")
             elif not linkable(c):

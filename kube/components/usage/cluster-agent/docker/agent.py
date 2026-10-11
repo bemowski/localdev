@@ -2,6 +2,7 @@
 
 Stdlib only. Runs as one pod in kube-system. Events (see ../../openapi.yaml):
   cluster.created                        once per cluster (type, role, platform, versions, ...)
+  cluster.updated                        the cluster's facts changed or became known (backfill)
   cluster.heartbeat                      every HEARTBEAT_S, with nodes/cores/memory/pods/namespaces
   cluster.event  profile.changed         the localdev profile or its components changed
   cluster.event  app.deployed            a Deployment in a user namespace was created or changed
@@ -10,16 +11,21 @@ Best-effort delivery: events are spooled as files in SPOOL_DIR (ephemeral) and P
 Most event ids are derived from the cluster id (uuid5), so a restarted agent rebuilds the same
 events and the server drops the repeats: no persistent state needed.
 
-Cluster facts the API can't tell: on localdev, ConfigMap kube-system/localdev-host (written by
-localdev's tasks: username, cluster_type, cluster_role, host OS, k3d version) and cnav/localdev-profile
-(profile, components). Elsewhere, CLUSTER_TYPE / CLUSTER_ROLE / CLUSTER_USERNAME / CLUSTER_PLATFORM
-env. The ConfigMap wins. Until a cluster type is known, nothing is sent.
+Cluster facts the API can't tell, best effort: on localdev, ConfigMap kube-system/localdev-host
+(written by localdev's tasks: username, cluster_type, cluster_role, host OS, k3d version) and
+cnav/localdev-profile (profile, components). Elsewhere, CLUSTER_TYPE / CLUSTER_ROLE /
+CLUSTER_USERNAME / CLUSTER_PLATFORM env. The ConfigMap wins over env; anything still missing is
+"unknown" (optional facts are left out). The agent starts sending right away, and when the facts
+change (e.g. the ConfigMap is created later: a backfill) it sends cluster.updated with what changed.
+On start it also sends cluster.updated with all current facts; its id is derived from the facts, so
+the server drops it when it already has them, and catches up when they changed while the agent was down.
 
 Environment (defaults): USAGE_URL (http://usage.usage.svc), POLL_S (30), FLUSH_S (30),
 HEARTBEAT_S (900), SPOOL_DIR (/spool), SPOOL_MAX_FILES (1000), SPOOL_MAX_AGE_S (259200),
-HTTP_TIMEOUT_S (5), LOG_LEVEL (info), CLUSTER_TYPE, CLUSTER_ROLE (dev), CLUSTER_USERNAME (system),
+HTTP_TIMEOUT_S (5), LOG_LEVEL (info), CLUSTER_TYPE, CLUSTER_ROLE, CLUSTER_USERNAME (all: unknown),
 CLUSTER_PLATFORM (derived from the kubelet version).
 """
+import hashlib
 import json
 import logging
 import os
@@ -36,8 +42,12 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 
-VERSION = "0.2.0"
+VERSION = "0.3.0"
 SOURCE = {"name": "localdev-cluster-agent", "version": VERSION}
+UNKNOWN = "unknown"                             # the API's value for a fact nobody reported (yet)
+# facts cluster.updated can carry (the envelope's username goes with them)
+UPDATABLE = ("cluster_type", "cluster_role", "platform", "platform_version", "kubernetes_version", "arch",
+             "os", "os_variant", "os_version")
 ADDON_LABEL = "objectset.rio.cattle.io/hash"   # k3s puts it on everything localdev's manifests create
 SYSTEM_NAMESPACES = {"kube-system", "kube-public", "kube-node-lease"}
 MAX_BATCH = 500                                 # the API's limit
@@ -57,10 +67,10 @@ class Config:
     spool_max_files: int = field(default_factory=lambda: int(os.environ.get("SPOOL_MAX_FILES", "1000")))
     spool_max_age_s: int = field(default_factory=lambda: int(os.environ.get("SPOOL_MAX_AGE_S", "259200")))
     http_timeout_s: float = field(default_factory=lambda: float(os.environ.get("HTTP_TIMEOUT_S", "5")))
-    # cluster facts for clusters without kube-system/localdev-host
+    # cluster facts for clusters without kube-system/localdev-host (empty: unknown)
     cluster_type: str = field(default_factory=lambda: os.environ.get("CLUSTER_TYPE", ""))
-    cluster_role: str = field(default_factory=lambda: os.environ.get("CLUSTER_ROLE", "dev"))
-    cluster_username: str = field(default_factory=lambda: os.environ.get("CLUSTER_USERNAME", "system"))
+    cluster_role: str = field(default_factory=lambda: os.environ.get("CLUSTER_ROLE", ""))
+    cluster_username: str = field(default_factory=lambda: os.environ.get("CLUSTER_USERNAME", ""))
     cluster_platform: str = field(default_factory=lambda: os.environ.get("CLUSTER_PLATFORM", ""))
 
 
@@ -170,6 +180,26 @@ def created_event(cluster_id, created_at, facts, profile, components, node_info)
     }
     data = {k: v for k, v in data.items() if v not in (None, "")}   # optional fields: omit when unknown
     return envelope("cluster.created", event_id(cluster_id, "created"), created_at, facts["username"], data)
+
+
+def stated_facts(facts, node_info):
+    """The facts as cluster.created / cluster.updated state them: unknown optional ones left out."""
+    out = {
+        "cluster_type": facts["cluster_type"], "cluster_role": facts["cluster_role"], "platform": facts["platform"],
+        "platform_version": facts.get("platform_version"), "kubernetes_version": node_info["kubeletVersion"],
+        "arch": node_info["architecture"],
+        "os": facts.get("os"), "os_variant": facts.get("os_variant"), "os_version": facts.get("os_version"),
+    }
+    return {k: v for k, v in out.items() if v not in (None, "")}
+
+
+def updated_event(cluster_id, username, stated, changed=None):
+    """cluster.updated with `changed` (default: all) of the stated facts. The id is derived from the
+    full facts + username, so the same state always gets the same id (the server drops repeats)."""
+    digest = hashlib.sha256(json.dumps([username, stated], sort_keys=True).encode()).hexdigest()[:16]
+    fields = stated if changed is None else {k: stated[k] for k in changed if k in stated}
+    return envelope("cluster.updated", event_id(cluster_id, f"updated/{digest}"), now_iso(), username,
+                    {"cluster_id": cluster_id, **fields})
 
 
 def cluster_event(cluster_id, eid, occurred_at, username, name, attributes):
@@ -348,6 +378,7 @@ class Agent:
         self.cfg, self.kube, self.spool, self.flusher, self.clock = cfg, kube, spool, flusher, clock
         self.cluster_id = self.created_at = None
         self.created_sent = False
+        self.stated = None              # (username, facts) last sent in created/updated
         self.profile_seen = None        # (profile, components) last seen
         self.apps_seen = set()          # (deployment uid, generation)
         self.next_heartbeat = 0.0
@@ -361,12 +392,13 @@ class Agent:
         log.info(f"event {what}: {detail}")
 
     def facts(self, host_cm):
-        """Cluster facts: kube-system/localdev-host (localdev) over env (other clusters)."""
+        """Cluster facts, best effort: kube-system/localdev-host (localdev) over env (other clusters),
+        else unknown."""
         host = (host_cm or {}).get("data") or {}
         return {
-            "username": host.get("username") or self.cfg.cluster_username,
-            "cluster_type": host.get("cluster_type") or self.cfg.cluster_type,
-            "cluster_role": host.get("cluster_role") or self.cfg.cluster_role,
+            "username": host.get("username") or self.cfg.cluster_username or UNKNOWN,
+            "cluster_type": host.get("cluster_type") or self.cfg.cluster_type or UNKNOWN,
+            "cluster_role": host.get("cluster_role") or self.cfg.cluster_role or UNKNOWN,
             "platform": host.get("platform") or self.cfg.cluster_platform,
             **{k: host[k] for k in ("platform_version", "os", "os_variant", "os_version") if host.get(k)},
         }
@@ -377,23 +409,46 @@ class Agent:
             self.cluster_id, self.created_at = ns["metadata"]["uid"], ns["metadata"]["creationTimestamp"]
             log.info(f"cluster id {self.cluster_id} (created {self.created_at})")
 
-        facts = self.facts(self.kube.get("/api/v1/namespaces/kube-system/configmaps/localdev-host"))
-        if not facts["cluster_type"]:
-            if not self.waiting_logged:
-                log.info("waiting for a cluster type: ConfigMap kube-system/localdev-host (written by localdev "
-                         "on the host) or CLUSTER_TYPE env")
-                self.waiting_logged = True
-            return
-        self.waiting_logged = False
+        host_cm = self.kube.get("/api/v1/namespaces/kube-system/configmaps/localdev-host")
+        facts = self.facts(host_cm)
+        if host_cm is None and not self.waiting_logged:
+            log.info("no ConfigMap kube-system/localdev-host: reporting what env and the API tell "
+                     f"(type {facts['cluster_type']}, role {facts['cluster_role']}); "
+                     "cluster.updated follows when it appears")
+            self.waiting_logged = True
+        elif host_cm is not None:
+            self.waiting_logged = False
         username = facts["username"]
         profile_cm = self.kube.get("/api/v1/namespaces/cnav/configmaps/localdev-profile")
         profile, components, rv = parse_profile(profile_cm) if profile_cm else (None, None, None)
 
+        node = (self.kube.get("/api/v1/nodes") or {}).get("items", [{}])[0]["status"]["nodeInfo"]
+        guessed_platform = not facts["platform"]          # from the kubelet version: a fallback guess
+        facts["platform"] = facts["platform"] or platform_from(node["kubeletVersion"])
+        stated = stated_facts(facts, node)
         if not self.created_sent:
-            node = (self.kube.get("/api/v1/nodes") or {}).get("items", [{}])[0]["status"]["nodeInfo"]
-            facts["platform"] = facts["platform"] or platform_from(node["kubeletVersion"])
             self.emit(created_event(self.cluster_id, self.created_at, facts, profile, components, node))
+            # and the current facts as an update: a no-op for the server if it has them, a catch-up
+            # if they changed while this agent wasn't running (created is a duplicate then)
+            # only known facts: an unknown or guessed one must not overwrite what the server may have
+            self.emit(updated_event(self.cluster_id, username, stated,
+                                    [k for k in UPDATABLE if k in stated and stated[k] != UNKNOWN
+                                     and not (k == "platform" and guessed_platform)]))
             self.created_sent = True
+        else:
+            # known facts are sticky: a fact that goes back to unknown (or away, e.g. the ConfigMap was
+            # deleted) keeps its last known value instead of overwriting it
+            prev_user, prev = self.stated
+            stated = {**prev, **{k: v for k, v in stated.items() if v != UNKNOWN or prev.get(k, UNKNOWN) == UNKNOWN}}
+            if guessed_platform:              # nor does a guess replace a reported platform
+                stated["platform"] = prev.get("platform", stated["platform"])
+            if username == UNKNOWN:
+                username = prev_user
+            changed = [k for k in UPDATABLE if k in stated and stated.get(k) != prev.get(k)]
+            if changed or username != prev_user:
+                # username alone: still needs a fact in data (minProperties); cluster_type is always there
+                self.emit(updated_event(self.cluster_id, username, stated, changed or ["cluster_type"]))
+        self.stated = (username, stated)
 
         if profile_cm:
             current = (profile, tuple(components))

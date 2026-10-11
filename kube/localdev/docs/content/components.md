@@ -8,6 +8,7 @@ one folder, `components/<name>/` in this repo, or a folder in your own project r
 |---|---|---|
 | cnav | cluster navigator at `/` | all (always on, infra layer) |
 | external-secrets | External Secrets Operator, Reloader, the `localdev` secret store | all (always on, infra layer) |
+| usage-agent | sends this cluster's usage events (created, heartbeat, profile changed, app deployed) to a usage server; spools when there's none. External: `kube/components/usage/cluster-agent` | all (always on, infra layer) |
 | postgres | Postgres + pgweb (`/pgweb`) | dev, knative, full |
 | nats | NATS + JetStream, NUI (`/nats`) | dev, knative, full |
 | docs | these docs (`/docs`) | dev, knative, full |
