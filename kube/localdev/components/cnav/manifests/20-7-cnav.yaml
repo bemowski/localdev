@@ -186,6 +186,46 @@ data:
         - name: whoami
           checks:
             - {kind: Deployment, namespace: demo, name: whoami}
+  # Logins for things NOT behind SSO, shown (masked) in the Ports card's Credentials tab.
+  # entry: a secret store entry (secret-store/<entry>, from secrets.store.toml / secrets.defaults.toml);
+  #   static: fixed values instead. extras: str.format templates over the entry's keys.
+  #   tool: <component> hides the row when the component isn't installed.
+  # Any other store entry with a `password` key is listed too (secret-store/<entry>), so components
+  # that bring their own logins (e.g. usage-db) show up without an edit here.
+  credentials.yaml: |
+    - name: Local admin
+      entry: localdev-admin
+      where: http://localhost/
+      note: SSO sign-in with username and password (instead of Google)
+    - name: Grafana admin
+      entry: localdev-admin
+      where: /grafana/login
+      note: Grafana's own login form (SSO users are signed in automatically)
+    - name: Keycloak admin console
+      tool: keycloak
+      entry: localdev-admin
+      where: /keycloak/admin/
+      note: realm master
+    - name: Keycloak test users
+      tool: keycloak
+      where: /keycloak/realms/localdev/account/
+      note: realm localdev (components/keycloak/realms/localdev.json); bob has the same password
+      static: {username: alice, password: password}
+    - name: Postgres
+      tool: postgres
+      entry: postgres-app
+      where: localhost:5432
+      note: superuser of the app database; also pgweb's login
+      extras:
+        uri: postgresql://{username}:{password}@localhost:5432/{dbname}
+        jdbc: jdbc:postgresql://localhost:5432/{dbname}?user={username}&password={password}
+    - name: Postgres, keycloak database
+      tool: keycloak
+      entry: keycloak-db
+      where: localhost:5432
+      note: database keycloak
+      extras:
+        uri: postgresql://{username}:{password}@localhost:5432/keycloak
 ---
 apiVersion: v1
 kind: ServiceAccount
@@ -235,6 +275,32 @@ roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: ClusterRole
   name: cnav-status
+subjects:
+  - kind: ServiceAccount
+    name: cnav
+    namespace: cnav
+---
+# /api/credentials: the secret store's own Secrets (namespace secret-store), nothing else. Anyone
+# signed in through SSO can read them on the page: intended for a local cluster, SSO is the gate.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: cnav-credentials
+  namespace: secret-store
+rules:
+  - apiGroups: [""]
+    resources: [secrets]
+    verbs: [get, list]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: cnav-credentials
+  namespace: secret-store
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: cnav-credentials
 subjects:
   - kind: ServiceAccount
     name: cnav

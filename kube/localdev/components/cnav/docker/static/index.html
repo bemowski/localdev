@@ -37,6 +37,7 @@
     }
   }
   * { box-sizing: border-box; }
+  [hidden] { display: none !important; }   /* beats display: flex etc. on toggled elements */
   body {
     margin: 0;
     background: var(--bg);
@@ -186,14 +187,47 @@
   .dot.red { background: var(--red); box-shadow: 0 0 0 3px color-mix(in srgb, var(--red) 25%, transparent); }
 
   /* row under the cards: ports (left) | events (right), each about a quarter of the screen high */
-  .dock { display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 3fr); gap: 16px; margin-top: 24px; }   /* full width of main, unlike the cards; events get more */
-  .dock-col {
-    min-width: 0; height: 25vh; min-height: 180px; overflow-y: auto; padding: 14px 18px 16px;
-    background: var(--card); border: 1px solid var(--border); border-radius: 12px; box-shadow: var(--shadow);
+  /* under the cards, full width of main: one card, three tabs (events | ports | credentials) */
+  .dock {
+    display: flex; flex-direction: column; min-width: 0; height: 32vh; min-height: 220px; margin-top: 24px;
+    padding: 12px 18px 14px; background: var(--card); border: 1px solid var(--border); border-radius: 12px;
+    box-shadow: var(--shadow);
   }
+  .dock-body { flex: 1; min-height: 0; overflow-y: auto; }
   .dock h2 { font-size: 16px; margin: 0; }
   .dock-head { display: flex; align-items: baseline; gap: 10px; margin-bottom: 8px; }
   .dock-sub { color: var(--muted); font-size: 12px; }
+  /* Ports | Credentials tabs: a tight segmented control in the card header */
+  .tabs { display: inline-flex; border: 1px solid var(--border); border-radius: 8px; padding: 2px; gap: 2px; }
+  .tab {
+    font: 600 14px system-ui, sans-serif; color: var(--muted); background: none; border: 0; cursor: pointer;
+    padding: 2px 10px; border-radius: 6px;
+  }
+  .tab:hover, .tab:focus-visible { color: var(--text); outline: none; }
+  .tab[aria-selected="true"] { color: var(--text); background: var(--panel); }
+  .creds { width: 100%; border-collapse: collapse; font-size: 13px; }
+  .creds td { padding: 5px 6px; border-top: 1px solid var(--border); vertical-align: top; }
+  .creds td:first-child { padding-left: 0; }
+  .creds tr:first-child td { border-top: 0; }
+  .creds .cname { font-weight: 600; width: 32%; min-width: 180px; }
+  .creds .cname a { color: inherit; text-decoration: none; }
+  .creds .cname a:hover { color: var(--accent); }
+  .creds .csub { display: block; font-weight: 400; color: var(--muted); font-size: 12px; white-space: normal; }
+  .creds .csub.mono { font: 12px ui-monospace, SFMono-Regular, Menlo, monospace; }
+  .creds .kv { display: grid; grid-template-columns: 72px minmax(0, 1fr) auto; gap: 2px 8px; align-items: center; }
+  .creds .cbtns:empty { display: none; }
+  .creds .k { color: var(--muted); font-size: 12px; }
+  .creds .v { font: 12px ui-monospace, SFMono-Regular, Menlo, monospace; overflow-wrap: anywhere; }
+  .creds .v.masked { color: var(--muted); letter-spacing: 1px; }
+  .creds .cbtns { display: flex; gap: 2px; justify-self: end; }
+  .creds td.cvals { width: 68%; }
+  .icon-btn {
+    display: inline-grid; place-items: center; width: 22px; height: 20px; padding: 0; cursor: pointer;
+    background: none; border: 1px solid transparent; border-radius: 5px; color: var(--muted);
+  }
+  .icon-btn:hover, .icon-btn:focus-visible { color: var(--accent); border-color: var(--border); outline: none; }
+  .icon-btn.done { color: var(--green); }
+  .icon-btn svg { width: 14px; height: 14px; }
   .ports { width: 100%; border-collapse: collapse; font-size: 13px; }
   .ports td { padding: 5px 8px; border-top: 1px solid var(--border); vertical-align: middle; white-space: nowrap; }
   .ports tr:first-child td { border-top: 0; }
@@ -217,6 +251,9 @@
     padding: 1px 8px; border: 1px solid var(--border); border-radius: 999px; color: var(--muted); font-size: 12px;
   }
   .dock-toggle input { margin: 0; accent-color: var(--accent); }
+  button.dock-toggle { background: none; font: inherit; font-size: 12px; line-height: 18px; }
+  button.dock-toggle:hover, button.dock-toggle:focus-visible { color: var(--accent); border-color: var(--accent); outline: none; }
+  button.dock-toggle[aria-pressed="true"] { color: var(--accent); border-color: var(--accent); }
   .dock-toggle:has(input:checked) { border-color: var(--accent); color: var(--accent); }
   .events { width: 100%; border-collapse: collapse; font-size: 13px; }
   .events td { padding: 5px 6px; border-top: 1px solid var(--border); vertical-align: top; }
@@ -248,7 +285,6 @@
   .ecount { margin-left: 4px; font: 11px ui-monospace, SFMono-Regular, Menlo, monospace; color: var(--muted); }
 
   @media (max-width: 860px) {
-    .dock { grid-template-columns: 1fr; }
     .layout { flex-direction: column; }
     main { padding: 24px 16px; }
     aside { width: auto; height: auto; position: static; border-left: 0; border-top: 1px solid var(--border); padding: 24px 16px; }
@@ -267,31 +303,41 @@
       </div>
     </header>
     <div class="grid" id="grid"></div>
-    <div class="dock">
-      <section class="dock-col">
-        <div class="dock-head">
-          <h2>Ports</h2>
-          <span class="dock-sub">exposed on this machine (k3d.yaml) → what answers in the cluster</span>
+    <section class="dock">
+      <div class="dock-head">
+        <div class="tabs" role="tablist">
+          <button class="tab" role="tab" data-tab="events" aria-selected="true" aria-controls="pane-events">Events</button>
+          <button class="tab" role="tab" data-tab="ports" aria-selected="false" aria-controls="pane-ports">Ports</button>
+          <button class="tab" role="tab" data-tab="creds" aria-selected="false" aria-controls="pane-creds">Credentials</button>
         </div>
-        <table class="ports"><tbody id="ports"><tr><td class="mono">loading…</td></tr></tbody></table>
-      </section>
-      <section class="dock-col">
-        <div class="dock-head">
-          <h2>Events</h2>
-          <span class="dock-sub" id="events-sub"></span>
-          <div class="dock-tools">
-            <label class="dock-toggle" title="Only problems: crash, image, unhealthy, restart, warning (red and amber)">
-              <input type="checkbox" id="events-severe"> severe
-            </label>
-            <label class="dock-toggle" title="Also show routine pod lifecycle events (scheduled, pulled, started, ...)">
-              <input type="checkbox" id="events-all"> all
-            </label>
-            <button class="refresh" id="events-refresh" title="Refresh events now" aria-label="Refresh events now">↻</button>
-          </div>
+        <span class="dock-sub" data-for="events" id="events-sub"></span>
+        <span class="dock-sub" data-for="ports" hidden>exposed on this machine (k3d.yaml) → what answers in the cluster</span>
+        <span class="dock-sub" data-for="creds" hidden>logins not behind SSO, from the secret store</span>
+        <div class="dock-tools" data-for="events">
+          <label class="dock-toggle" title="Only problems: crash, image, unhealthy, restart, warning (red and amber)">
+            <input type="checkbox" id="events-severe"> severe
+          </label>
+          <label class="dock-toggle" title="Also show routine pod lifecycle events (scheduled, pulled, started, ...)">
+            <input type="checkbox" id="events-all"> all
+          </label>
+          <button class="refresh" id="events-refresh" title="Refresh events now" aria-label="Refresh events now">↻</button>
         </div>
-        <table class="events"><tbody id="events"><tr><td class="mono">loading…</td></tr></tbody></table>
-      </section>
-    </div>
+        <div class="dock-tools" data-for="creds" hidden>
+          <button class="dock-toggle" id="creds-unmask" type="button" title="Show every secret value in this list">unmask all</button>
+        </div>
+      </div>
+      <div class="dock-body">
+        <div id="pane-events" role="tabpanel">
+          <table class="events"><tbody id="events"><tr><td class="mono">loading…</td></tr></tbody></table>
+        </div>
+        <div id="pane-ports" role="tabpanel" hidden>
+          <table class="ports"><tbody id="ports"><tr><td class="mono">loading…</td></tr></tbody></table>
+        </div>
+        <div id="pane-creds" role="tabpanel" hidden>
+          <table class="creds"><tbody id="creds"><tr><td class="mono">loading…</td></tr></tbody></table>
+        </div>
+      </div>
+    </section>
   </main>
   <aside>
     <div class="status-head">
@@ -501,6 +547,148 @@
       document.getElementById('ports').replaceChildren(tr);
     }
   }
+
+  // --- ports | credentials tabs ---
+  const ICONS = {
+    eye: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></svg>',
+    eyeOff: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17.9 17.9A10.4 10.4 0 0 1 12 19c-6.5 0-10-7-10-7a18.5 18.5 0 0 1 5.1-5.9M9.9 5.2A9.7 9.7 0 0 1 12 5c6.5 0 10 7 10 7a18.6 18.6 0 0 1-2.2 3.2M14.1 14.1a3 3 0 1 1-4.2-4.2"/><path d="M2 2l20 20"/></svg>',
+    copy: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>',
+    check: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg>',
+  };
+  function iconButton(icon, label) {
+    const b = el('button', 'icon-btn');
+    b.type = 'button';
+    b.innerHTML = ICONS[icon];   // static markup from ICONS only
+    b.title = label;
+    b.setAttribute('aria-label', label);
+    return b;
+  }
+
+  const TABS = ['events', 'ports', 'creds'];
+  function showTab(name) {
+    if (!TABS.includes(name)) name = 'events';
+    for (const b of document.querySelectorAll('.tab')) b.setAttribute('aria-selected', String(b.dataset.tab === name));
+    for (const t of TABS) document.getElementById(`pane-${t}`).hidden = t !== name;
+    for (const x of document.querySelectorAll('.dock-head [data-for]')) x.hidden = x.dataset.for !== name;
+    try { localStorage.setItem('cnav.dock.tab', name); } catch {}
+    if (name === 'creds') refreshCredentials();
+  }
+  for (const b of document.querySelectorAll('.tab')) b.addEventListener('click', () => showTab(b.dataset.tab));
+
+  // values are fetched per row, only when revealed or copied, and kept in memory for this page
+  const credValues = new Map();
+  async function credentialValues(id) {
+    if (!credValues.has(id)) {
+      const r = checkAuth(await fetch(`api/credentials/${encodeURIComponent(id)}`, { cache: 'no-store' }));
+      const data = await r.json();
+      if (!r.ok) throw new Error(data.error || `HTTP ${r.status}`);
+      credValues.set(id, data.values);
+    }
+    return credValues.get(id);
+  }
+
+  const MASK = '••••••••';
+  async function copyText(btn, text) {
+    try {
+      await navigator.clipboard.writeText(text);
+      btn.innerHTML = ICONS.check; btn.classList.add('done');
+      setTimeout(() => { btn.innerHTML = ICONS.copy; btn.classList.remove('done'); }, 1200);
+    } catch (err) { btn.title = `Copy failed: ${err.message}`; }
+  }
+  let secretFields = [];   // setShown(bool) per masked field on the page
+  const unmaskBtn = document.getElementById('creds-unmask');
+  function setUnmaskAll(on) {
+    unmaskBtn.setAttribute('aria-pressed', String(on));
+    unmaskBtn.textContent = on ? 'mask all' : 'unmask all';
+    unmaskBtn.title = on ? 'Hide every secret value again' : 'Show every secret value in this list';
+  }
+  unmaskBtn.addEventListener('click', () => {
+    const on = unmaskBtn.getAttribute('aria-pressed') !== 'true';
+    setUnmaskAll(on);
+    for (const setShown of secretFields) setShown(on);
+  });
+
+  function renderCredentials(data) {
+    secretFields = [];
+    setUnmaskAll(false);   // a fresh list starts masked
+    const body = document.getElementById('creds');
+    body.replaceChildren();
+    for (const c of data.credentials) {
+      const tr = el('tr');
+      const name = el('td', 'cname');
+      const isUrl = c.where && (c.where.startsWith('/') || /^https?:/.test(c.where));
+      const title = isUrl ? el('a') : el('span');
+      if (isUrl) { title.href = c.where; title.target = '_blank'; title.rel = 'noopener'; title.title = `Open ${c.where}`; }
+      title.textContent = c.name;
+      name.append(title);
+      if (c.where) name.append(el('span', 'csub mono', c.where));
+      if (c.source === 'discovered') name.append(el('span', 'csub mono', `secret-store/${c.entry}`));
+      if (c.note) name.append(el('span', 'csub', c.note));
+      const vals = el('td', 'cvals');
+      if (c.missing) {
+        vals.append(el('span', 'csub', `not in the secret store yet (entry ${c.entry}; run mise run secrets:sync)`));
+      } else {
+        const kv = el('div', 'kv');
+        for (const f of c.fields) {
+          const key = f.key;
+          const btns = el('span', 'cbtns');
+          if (!f.secret) {   // usernames, db names: shown as is, just a copy button
+            const copy = iconButton('copy', `Copy ${key}`);
+            copy.addEventListener('click', () => copyText(copy, f.value ?? ''));
+            btns.append(copy);
+            kv.append(el('span', 'k', key), el('span', 'v', f.value ?? ''), btns);
+            continue;
+          }
+          const v = el('span', 'v masked', MASK);
+          const eye = iconButton('eye', `Show ${key}`);
+          const copy = iconButton('copy', `Copy ${key}`);
+          const setShown = async (show) => {
+            if (!show) {
+              v.textContent = MASK; v.classList.add('masked');
+              eye.innerHTML = ICONS.eye; eye.title = `Show ${key}`;
+              return;
+            }
+            try {
+              const values = await credentialValues(c.id);
+              v.textContent = values[key] ?? ''; v.classList.remove('masked');
+              eye.innerHTML = ICONS.eyeOff; eye.title = `Hide ${key}`;
+            } catch (err) { v.textContent = `unavailable: ${err.message}`; }
+          };
+          secretFields.push(setShown);
+          eye.addEventListener('click', () => setShown(v.classList.contains('masked')));
+          copy.addEventListener('click', async () => {
+            try { copyText(copy, (await credentialValues(c.id))[key] ?? ''); }
+            catch (err) { copy.title = `Copy failed: ${err.message}`; }
+          });
+          btns.append(eye, copy);
+          kv.append(el('span', 'k', key), v, btns);
+        }
+        vals.append(kv);
+      }
+      tr.append(name, vals);
+      body.append(tr);
+    }
+    if (!data.credentials.length) {
+      const tr = el('tr');
+      tr.append(el('td', 'mono', 'no credentials'));
+      body.append(tr);
+    }
+  }
+
+  async function refreshCredentials() {
+    credValues.clear();   // re-read values on the next reveal (a secrets:sync may have changed them)
+    try {
+      const r = checkAuth(await fetch('api/credentials', { cache: 'no-store' }));
+      const data = await r.json();
+      if (!r.ok) throw new Error(data.error || `HTTP ${r.status}`);
+      renderCredentials(data);
+    } catch (err) {
+      const tr = el('tr');
+      tr.append(el('td', 'mono', `credentials unavailable: ${err.message}`));
+      document.getElementById('creds').replaceChildren(tr);
+    }
+  }
+  try { showTab(localStorage.getItem('cnav.dock.tab') || 'events'); } catch { showTab('events'); }
 
   // --- events ---
   // filters: "all" adds routine events (server side), "severe" keeps only red/amber rows (here);

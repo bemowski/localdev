@@ -39,22 +39,25 @@ _spec.loader.exec_module(profiles)
 STORE = Path(os.environ.get("LOCALDEV_SECRETS_STORE", LOCALDEV / "secrets.store.toml"))
 NAMESPACE = "secret-store"
 LABEL = {"localdev/secret-store": "managed"}
+OWNER = {}   # entry -> component whose secrets.defaults.toml declares it (filled by load())
 
 
 def sources():
-    """(label, path) of every file feeding the store, lowest precedence first."""
-    out = [("defaults", LOCALDEV / "secrets.defaults.toml")]
-    out += [(f"{c} defaults", profiles.component_dir(c) / "secrets.defaults.toml")
+    """(label, path, component) of every file feeding the store, lowest precedence first."""
+    out = [("defaults", LOCALDEV / "secrets.defaults.toml", None)]
+    out += [(f"{c} defaults", profiles.component_dir(c) / "secrets.defaults.toml", c)
             for c in profiles.components_on_disk()]
-    out.append(("secrets.store.toml", STORE))
-    return [(label, p) for label, p in out if p.exists()]
+    out.append(("secrets.store.toml", STORE, None))
+    return [(label, p, c) for label, p, c in out if p.exists()]
 
 
 def load():
     """{entry: {key: value}}, plus {(entry, key): source label} and the required (entry, key)s."""
     data, origin, required = {}, {}, set()
-    for label, path in sources():
+    for label, path, component in sources():
         for entry, keys in tomllib.loads(path.read_text()).items():
+            if component:
+                OWNER.setdefault(entry, component)
             if not isinstance(keys, dict):
                 sys.exit(f"store: [{entry}] in {path} must be a table of key = value")
             for k, v in keys.items():
@@ -73,7 +76,10 @@ def missing(data, required):
 def render(data):
     items = [{
         "apiVersion": "v1", "kind": "Secret", "type": "Opaque",
-        "metadata": {"name": entry, "namespace": NAMESPACE, "labels": LABEL},
+        # localdev/component: the declaring component, so cnav can hide entries of components
+        # that aren't in the cluster's profile
+        "metadata": {"name": entry, "namespace": NAMESPACE,
+                     "labels": {**LABEL, **({"localdev/component": OWNER[entry]} if entry in OWNER else {})}},
         # data (not stringData): an unchanged entry then applies as "unchanged"
         "data": {k: base64.b64encode(v.encode()).decode() for k, v in keys.items()},
     } for entry, keys in data.items()]

@@ -3,10 +3,13 @@
 Serves the static page, the config files (cards.yaml, status.yaml),
 /api/status, which evaluates status.yaml against the Kubernetes API using the
 pod's service account, /api/ports, the host ports k3d.yaml exposes and what
-answers them in the cluster, and /api/events, cluster events from Loki (72h, shipped
-by Alloy) or, while Loki doesn't answer, from the Kubernetes API (last hour).
+answers them in the cluster, /api/events, cluster events from Loki (72h, shipped
+by Alloy) or, while Loki doesn't answer, from the Kubernetes API (last hour), and
+/api/credentials, logins for things not behind SSO (credentials.yaml + the secret store;
+values only from /api/credentials/<id>, when the page reveals one).
 Stdlib only, plus PyYAML.
 """
+import base64
 import json
 import logging
 import os
@@ -649,6 +652,90 @@ def events(include_routine=False):
             "window": "72h" if source == "loki" else "1h", "routine": hidden, "events": out[:EVENTS_MAX]}
 
 
+# --- credentials --------------------------------------------------------------
+
+STORE_NS = "secret-store"     # the external-secrets component's local store, one Secret per entry
+# keys whose values are masked on the page (and only sent on reveal); usernames, db names etc. aren't
+SECRET_KEY = re.compile(r"pass|secret|token|api[-_]?key|private|credential", re.I)
+
+
+def is_secret(key, template=None):
+    """A key is secret by name; an extra (a template) is secret if it uses a secret key."""
+    if SECRET_KEY.search(key):
+        return True
+    return bool(template) and any(SECRET_KEY.search(k) for k in re.findall(r"{(\w[\w-]*)}", template))
+
+
+def slug(text):
+    return re.sub(r"[^a-z0-9]+", "-", text.lower()).strip("-")
+
+
+def store_entries():
+    """{entry: {key: value}} from the secret store's Secrets, minus entries declared by a component
+    (label localdev/component, set by store.py) that isn't in the cluster's profile."""
+    enabled = enabled_components()
+    out = {}
+    for sec in (Kube().get(f"/api/v1/namespaces/{STORE_NS}/secrets") or {}).get("items", []):
+        owner = (sec["metadata"].get("labels") or {}).get("localdev/component")
+        if owner and enabled is not None and owner not in enabled:
+            continue
+        data = sec.get("data") or {}
+        out[sec["metadata"]["name"]] = {k: base64.b64decode(v).decode(errors="replace") for k, v in data.items()}
+    return out
+
+
+def credential_rows(entries):
+    """Curated rows (credentials.yaml, for the profile) + any other store entry with a password."""
+    try:
+        curated = for_profile(yaml.safe_load((CONFIG_DIR / "credentials.yaml").read_text()) or [])
+    except OSError:
+        curated = []
+    rows, used = [], set()
+    for c in curated:
+        if not isinstance(c, dict) or not c.get("name"):
+            continue
+        values = dict(c.get("static") or {}) if "static" in c else entries.get(c.get("entry"))
+        used.add(c.get("entry"))
+        rows.append({"id": slug(c["name"]), "name": c["name"], "where": c.get("where"), "note": c.get("note"),
+                     "entry": c.get("entry"), "source": "static" if "static" in c else "entry",
+                     "values": values, "extras": c.get("extras") or {}})
+    for entry, values in sorted(entries.items()):
+        if entry not in used and "password" in values:
+            rows.append({"id": slug(f"store-{entry}"), "name": entry, "where": None, "note": None,
+                         "entry": entry, "source": "discovered", "values": values, "extras": {}})
+    return rows
+
+
+def credentials():
+    """The rows with their non-secret values (usernames, db names); secret ones only as key names."""
+    out = []
+    for r in credential_rows(store_entries()):
+        values = r["values"] or {}
+        fields = [{"key": k, "secret": is_secret(k), **({} if is_secret(k) else {"value": v})}
+                  for k, v in sorted(values.items(), key=lambda kv: (is_secret(kv[0]), kv[0] != "username"))]
+        fields += [{"key": k, "secret": True} if is_secret(k, t)
+                   else {"key": k, "secret": False, "value": t.format(**values) if values else t}
+                   for k, t in r["extras"].items()]
+        out.append({"id": r["id"], "name": r["name"], "where": r["where"], "note": r["note"],
+                    "entry": r["entry"], "source": r["source"], "missing": r["values"] is None,
+                    "fields": fields})
+    return {"credentials": out}
+
+
+def credential_values(cid):
+    """One row's values, extras rendered from them; None if there's no such row."""
+    for r in credential_rows(store_entries()):
+        if r["id"] == cid:
+            values = dict(r["values"] or {})
+            for name, template in r["extras"].items():
+                try:
+                    values[name] = template.format(**(r["values"] or {}))
+                except (KeyError, IndexError, ValueError) as e:
+                    values[name] = f"(template error: {e})"
+            return {"id": cid, "values": values}
+    return None
+
+
 # --- http -------------------------------------------------------------------
 
 class Handler(SimpleHTTPRequestHandler):
@@ -693,6 +780,15 @@ class Handler(SimpleHTTPRequestHandler):
                 return self.send_json(200, events(include_routine=query.get("all", ["0"])[0] == "1"))
             except Exception as e:
                 log.exception("/api/events failed")
+                return self.send_json(503, {"error": str(e)})
+        if path == "/api/credentials" or path.startswith("/api/credentials/"):
+            try:
+                if path == "/api/credentials":
+                    return self.send_json(200, credentials())
+                body = credential_values(path.rsplit("/", 1)[1])
+                return self.send_json(200, body) if body else self.send_json(404, {"error": "no such credential"})
+            except Exception as e:
+                log.exception("%s failed", path)
                 return self.send_json(503, {"error": str(e)})
         if path in ("/cards.yaml", "/status.yaml"):
             f = CONFIG_DIR / path.lstrip("/")

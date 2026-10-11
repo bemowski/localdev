@@ -91,6 +91,12 @@ mise run secrets:list      # entries and keys (no values), where each comes from
   (it never overwrites or deletes anything). Then encrypt the new file, and delete `secrets.env` and
   `secrets.env.asc` when you're happy.
 
+!!! tip "Looking up a password"
+    The cluster navigator's **Credentials** tab (next to **Ports**) shows the store's logins, masked,
+    with reveal and copy buttons. A store entry with a `password` key appears there automatically
+    while its component is installed; for a nicer row (a link, connection URLs), add it to
+    `credentials.yaml` in cnav's ConfigMap.
+
 ## Using a secret in a component
 
 Add an entry to `secrets.store.toml` (or, for fixed dev values, a `secrets.defaults.toml` in your

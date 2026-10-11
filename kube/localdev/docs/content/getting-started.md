@@ -108,6 +108,10 @@ This creates the k3d cluster, loads the secrets, deploys everything and builds t
 Then open [http://localhost/](http://localhost/) and sign in, either with Google (accounts on the
 allow-list) or as `admin` with the `localdev-admin` password from `secrets.store.toml`.
 
+Need a password for something that isn't behind SSO (Grafana's admin form, the Keycloak console,
+Postgres from a SQL client)? The navigator's **Credentials** tab, next to **Ports**, lists them masked,
+with a button to reveal or copy each one.
+
 ## Profiles
 
 A profile chooses which optional tools run. Platform, infra and apps always run.
