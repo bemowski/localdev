@@ -4,6 +4,8 @@ Ephemeral local Kubernetes (k3d) with path-based routing on `http://localhost/<a
 
 **Docs:** [http://localhost/docs/](http://localhost/docs/) when the cluster runs (source: [`docs/content/`](docs/content/)): concepts, getting started, moving from docker compose, cluster layout, components, building your own component (including from another project, via a gitignored `local.toml`), and secrets (External Secrets Operator with a local store: `secrets.store.toml`, `mise run secrets:sync`). This readme keeps the setup and reference details.
 
+**Working with an AI coding agent?** [`AGENTS.md`](AGENTS.md) tells it how to integrate an app as a component without modifying localdev itself.
+
 | path | app |
 |---|---|
 | `/` | Cluster navigator (cnav): cards linking to the apps below. It's also the catch-all, so unknown paths land here. |

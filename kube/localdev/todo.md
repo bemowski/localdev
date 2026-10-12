@@ -4,9 +4,13 @@
   - certmanager
 
 * Dematic
-  - jenkins
-  - sortation
   - usage server in stage 
+    - add argo app-of-apps deploy
+    - add mise based build/version/push to gcloud registry
+    - 
+
+  - jenkins --> localdev
+  - sortation --> localdev
 
 * Formalize the "component" 
   - are there existing constructs
