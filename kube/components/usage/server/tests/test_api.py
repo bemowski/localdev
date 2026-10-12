@@ -10,6 +10,11 @@ def with_cluster(batch: dict, cluster_id: str) -> dict:
     return batch
 
 
+def test_ping(client):
+    r = client.get("/ping")
+    assert r.status_code == 200 and r.json() == {"ping": "pong"}
+
+
 def test_healthz(client):
     r = client.get("/healthz")
     assert r.status_code == 200 and r.json() == {"status": "ok"}

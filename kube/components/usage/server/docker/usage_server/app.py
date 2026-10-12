@@ -1,4 +1,4 @@
-"""HTTP API: implements openapi.yaml (POST /v1/events, GET /healthz, GET /openapi.yaml).
+"""HTTP API: implements openapi.yaml (POST /v1/events, GET /ping, GET /healthz, GET /openapi.yaml).
 
 Environment:
   PGHOST, PGPORT, PGDATABASE, PGUSER, PGPASSWORD   database (libpq)
@@ -86,6 +86,10 @@ def create_app(store: Store | None = None, spec_path: Path | None = None) -> Fas
         types = ", ".join(f"{t}={n}" for t, n in sorted(Tally(ev["type"] for ev in new).items()))
         log.info(f"stored {len(new)} event(s), {duplicates} duplicate(s)" + (f": {types}" if types else ""))
         return JSONResponse({"accepted": len(new), "duplicates": duplicates}, status_code=202)
+
+    @app.get("/ping")
+    async def ping():
+        return {"ping": "pong"}
 
     @app.get("/healthz")
     async def health():

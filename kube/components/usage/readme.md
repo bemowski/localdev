@@ -35,6 +35,7 @@ mise run api:test     # lint + check
 | method | path | |
 |---|---|---|
 | `POST` | `/v1/events` | batch of 1–500 events → `202 {accepted, duplicates}`; 400 / 413 / 422 / 503 |
+| `GET` | `/ping` | `{ping: pong}`, no database check |
 | `GET` | `/healthz` | `{status: ok \| unavailable}` |
 | `GET` | `/openapi.yaml` | the spec |
 

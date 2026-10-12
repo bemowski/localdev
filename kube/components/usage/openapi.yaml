@@ -163,6 +163,21 @@ paths:
               schema:
                 $ref: '#/components/schemas/Error'
 
+  /ping:
+    get:
+      operationId: ping
+      tags: [operations]
+      summary: Reachability check
+      description: Always 200 while the server is up. Doesn't touch the database (see /healthz).
+      responses:
+        '200':
+          description: Pong.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Pong'
+              example: {ping: pong}
+
   /healthz:
     get:
       operationId: health
@@ -540,6 +555,15 @@ components:
       unevaluatedProperties: false
 
     # ---------- operations ----------
+    Pong:
+      type: object
+      required: [ping]
+      additionalProperties: false
+      properties:
+        ping:
+          type: string
+          const: pong
+
     Health:
       type: object
       required: [status]
