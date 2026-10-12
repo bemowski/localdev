@@ -347,7 +347,11 @@ set -euo pipefail
 if [ -z "${usage_profile:-}" ]; then python3 profile.py list; exit 0; fi
 to="$usage_profile"
 echo "profile: $(python3 profile.py current) -> $to"
+before=$(cat runtime.profile/components 2>/dev/null || true)   # enabled before the switch
 python3 profile.py link "$to"          # additions deploy by themselves (k3s + Grafana follow the links)
+# the store reads every known component's secrets.defaults.toml (local.toml ones too): load what the
+# additions' ExternalSecrets need. Idempotent, applies only changes
+mise run secrets:sync
 # uninstall components that are deployed (AddOn exists) but not in the new profile. k3s never
 # deletes objects when their files disappear. Re-running finishes a partial switch.
 addons=$(kubectl -n kube-system get addon -o jsonpath='{.items[*].metadata.name}')
@@ -369,9 +373,11 @@ done <<< "$removed"
 # so give re-added components' manifests a fresh mtime (content and git are unaffected)
 missing=$(python3 profile.py missing $(kubectl -n kube-system get addon -o jsonpath='{.items[*].metadata.name}'))
 if [ -n "$missing" ]; then cut -f2 <<< "$missing" | while IFS= read -r f; do touch "$f"; done; fi
-# newly enabled components with an image (build.sh or docker/): build it (until then ImagePullBackOff)
+# newly enabled components with an image (build.sh or docker/): build it (until then ImagePullBackOff).
+# Newly enabled = not in the profile before, or re-added (missing). Not `missing` alone: k3s deploys
+# the additions while the removals above wait, so by now they usually have an AddOn already.
 for c in $(python3 profile.py buildable); do
-    if cut -f1 <<< "$missing" | grep -qx "$c"; then mise run build "$c"; fi
+    if ! grep -qx "$c" <<< "$before" || cut -f1 <<< "$missing" | grep -qx "$c"; then mise run build "$c"; fi
 done
 mise run cluster:profile:sync
 if python3 profile.py enabled keycloak; then mise run keycloak:apply; fi

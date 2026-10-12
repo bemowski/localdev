@@ -106,7 +106,7 @@ requires = ["postgres"]
 layer = "apps"
 
 [profiles]
-usage = { description = "dev + the usage server", components = ["postgres", "nats", "docs", "usage"] }
+usage = { description = "Postgres + docs + the usage server", components = ["postgres", "docs", "usage"] }
 ```
 
 Then `mise run cluster:profile usage` (or `cluster:create usage`). `mise run cluster:profile dev` removes it.
