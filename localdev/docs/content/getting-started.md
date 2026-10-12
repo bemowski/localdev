@@ -8,7 +8,7 @@ platform needs the same things:
 - **Docker**, with about 6 GB of memory available to it.
 - **[mise](https://mise.jdx.dev)**, activated in your shell.
 - **A terminal:** a Linux shell, the macOS Terminal, or a WSL shell. Not PowerShell or `cmd`.
-- **git**, **curl**, and **gpg** (gpg only to decrypt `secrets.store.toml.asc`).
+- **git** and **curl**.
 - **Free host ports:** 80 (ingress), 5005 (image registry), and 5432 / 4222 (Postgres / NATS, on 127.0.0.1).
 
 Set up your platform:
@@ -116,8 +116,8 @@ Then, on every platform:
 
 - **`mise install`** in `kube/localdev` (run `mise trust` first if asked). This gets k3d, kubectl,
   kn, yq and Python.
-- **`secrets.store.toml`** (or the encrypted `secrets.store.toml.asc`): the Google OAuth client, the
-  cookie secret and the local admin password. See [Secrets](secrets.md), and the readme for the
+- **`secrets.store.toml`** (optional): the Google OAuth client, the cookie secret and the local admin
+  password. Without it you sign in as `admin` / `admin` and Google sign-in is off. See [Secrets](secrets.md), and the readme for the
   one-time Google setup.
 
 If something doesn't work on your platform, see [Platform notes](platform-notes.md).

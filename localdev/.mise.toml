@@ -148,17 +148,22 @@ echo "runtime.data deleted."
 """
 
 # --- secrets: the store behind the External Secrets Operator (components/external-secrets) --------
-# secrets.defaults.toml + components/*/secrets.defaults.toml + secrets.store.toml (gitignored;
-# optional encrypted .asc) -> Secrets in namespace secret-store, read by ClusterSecretStore
+# secrets.defaults.toml + components/*/secrets.defaults.toml + secrets.store.toml (gitignored,
+# optional; never decrypted implicitly) -> Secrets in namespace secret-store, read by ClusterSecretStore
 # `localdev`; each consumer's ExternalSecret syncs what it needs. See docs: Secrets.
 
+# never decrypt here: the .asc is only readable with its owner's key; decrypt it yourself if it's yours
 [tasks."secrets:check"]
-description = "Decrypt secrets.store.toml.asc if it's newer than secrets.store.toml, and check required secrets are set"
+description = "Check required secrets are set (and point out an encrypted store that isn't decrypted)"
 hide = true
 run = """#!/bin/bash
 set -euo pipefail
-if [ -f secrets.store.toml.asc ] && { [ ! -s secrets.store.toml ] || [ secrets.store.toml.asc -nt secrets.store.toml ]; }; then
-    mise run decrypt "{{config_root}}/secrets.store.toml.asc"
+if [ -f secrets.store.toml.asc ]; then
+    if [ ! -s secrets.store.toml ]; then
+        echo "  note: secrets.store.toml.asc exists but isn't decrypted - using the defaults. If it's yours, decrypt it yourself first" >&2
+    elif [ secrets.store.toml.asc -nt secrets.store.toml ]; then
+        echo "  note: secrets.store.toml.asc is newer than secrets.store.toml - decrypt it yourself if you want those values" >&2
+    fi
 fi
 python3 components/external-secrets/store.py check
 """
@@ -190,10 +195,11 @@ description = "One-time: create secrets.store.toml from an old secrets.env (Goog
 run = """#!/bin/bash
 set -euo pipefail
 if [ -e secrets.store.toml ]; then echo "secrets.store.toml already exists - not overwriting" >&2; exit 1; fi
-if [ -f secrets.env.asc ] && { [ ! -s secrets.env ] || [ secrets.env.asc -nt secrets.env ]; }; then
-    mise run decrypt "{{config_root}}/secrets.env.asc"
+if [ ! -f secrets.env ]; then
+    if [ -f secrets.env.asc ]; then echo "no secrets.env to migrate - decrypt secrets.env.asc yourself first" >&2
+    else echo "no secrets.env to migrate" >&2; fi
+    exit 1
 fi
-[ -f secrets.env ] || { echo "no secrets.env to migrate" >&2; exit 1; }
 (umask 077; python3 components/external-secrets/store.py migrate secrets.env > secrets.store.toml)
 python3 components/external-secrets/store.py check && echo "wrote secrets.store.toml (all required secrets set)"
 echo "next: mise run encrypt secrets.store.toml   # -> secrets.store.toml.asc, commit it"

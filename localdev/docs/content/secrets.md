@@ -56,7 +56,7 @@ The store's values are merged from these files, later ones winning:
 
 | file | committed? | holds |
 |---|---|---|
-| `secrets.defaults.toml` | yes | the platform entries: their keys, fixed values (`username = "admin"`), and `""` for **required** values |
+| `secrets.defaults.toml` | yes | the platform entries: their keys and dev defaults (`admin` / `admin`, placeholder Google client): enough to run with Google sign-in off |
 | `components/<c>/secrets.defaults.toml` | yes | a component's fixed dev values (Postgres `app` / `localdev`) |
 | **`secrets.store.toml`** | **no** (gitignored) | your real secrets and any overrides |
 
@@ -83,11 +83,15 @@ mise run secrets:sync      # merge the files into the store; ESO and Reloader ta
 mise run secrets:list      # entries and keys (no values), where each comes from, ExternalSecret status
 ```
 
-- `cluster:create` checks that every required value is set before it starts, and syncs after.
+- `secrets.store.toml` is optional: without it you sign in as `admin` / `admin` and the Google button
+  fails until you set a real `[sso]` client. `secrets:check` says so.
+- `cluster:create` checks that every required value (`""` in a defaults file) is set before it
+  starts, and syncs after.
 - Entries removed from the files are removed from the store.
 - To share values with a team without committing them in plain text, encrypt the file
-  (`mise run encrypt secrets.store.toml`) and commit `secrets.store.toml.asc`; it is decrypted
-  automatically when it is newer than your copy.
+  (`mise run encrypt secrets.store.toml`) and commit `secrets.store.toml.asc`. Nothing decrypts it
+  automatically: decrypt it yourself. `secrets:check` only notes when it's there but not decrypted,
+  or newer than your copy.
 - **Coming from `secrets.env`?** `mise run secrets:migrate` writes `secrets.store.toml` from it once
   (it never overwrites or deletes anything). Then encrypt the new file, and delete `secrets.env` and
   `secrets.env.asc` when you're happy.
