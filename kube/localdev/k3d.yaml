@@ -14,7 +14,7 @@ ports:
   # tools, reachable from this machine only (127.0.0.1); answered by a LoadBalancer Service in the
   # component when it's installed, otherwise the connection is refused. A running cluster picks up
   # a new mapping with `k3d cluster edit localdev --port-add <spec>@loadbalancer` (or cluster:recreate).
-  - port: 127.0.0.1:5432:5432   # postgres (components/postgres: pg/postgres-local)
+  - port: 127.0.0.1:5432:5432   # postgres (components/postgres: postgres/postgres-local)
     nodeFilters:
       - loadbalancer
   - port: 127.0.0.1:4222:4222   # nats (components/nats: nats/nats-local)

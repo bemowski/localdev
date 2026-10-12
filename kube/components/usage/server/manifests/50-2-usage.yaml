@@ -1,5 +1,5 @@
 # usage server: write-only ingest of tool-usage events (../../openapi.yaml) into database `usage`
-# on pg/postgres.
+# on postgres/postgres.
 #   desktop:     http://localhost/usage/api/v1/events     (public: no localdev SSO; internal only)
 #   in cluster:  http://usage.usage.svc/v1/events
 #   build:       mise run build usage   (server/build.sh)
@@ -29,10 +29,10 @@ spec:
     spec:
       enableServiceLinks: false
       initContainers:
-        - name: create-db       # idempotent: roles + database on pg/postgres
+        - name: create-db       # idempotent: roles + database on postgres/postgres
           image: postgres:18.6
           env:
-            - {name: PGHOST, value: postgres-rw.pg.svc}
+            - {name: PGHOST, value: postgres-rw.postgres.svc}
             - {name: PGDATABASE, value: app}
             - name: PGUSER
               valueFrom: {secretKeyRef: {name: usage-db, key: pg-admin-user}}
@@ -71,7 +71,7 @@ spec:
           image: localdev-registry:5005/usage:latest
           imagePullPolicy: Always
           env:
-            - {name: PGHOST, value: postgres-rw.pg.svc}
+            - {name: PGHOST, value: postgres-rw.postgres.svc}
             - {name: PGPORT, value: "5432"}
             - {name: PGDATABASE, value: usage}
             - name: PGUSER

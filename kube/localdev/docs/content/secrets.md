@@ -20,7 +20,7 @@ Today the store is **local**: no cloud account needed. Moving it to a cloud secr
 | `sso` | `google-client-id`, `google-client-secret`, `cookie-secret` | `auth/oauth2-proxy` |
 | `sso-access` | `emails`, `domains` (lists) | `auth/oauth2-proxy-access`: who may sign in with Google |
 | `localdev-admin` | `username`, `password` | `auth/oauth2-proxy-htpasswd` (bcrypt line, built by ESO), `monitoring/grafana-admin`, `keycloak/keycloak-admin` |
-| `postgres-app` | `username`, `password`, `dbname` | `pg/postgres-app` (+ `host`, `port`, `uri`, `jdbc-uri`), `keycloak/keycloak-db` |
+| `postgres-app` | `username`, `password`, `dbname` | `postgres/postgres-app` (+ `host`, `port`, `uri`, `jdbc-uri`), `keycloak/keycloak-db` |
 | `keycloak-db` | `username`, `password` | `keycloak/keycloak-db` |
 | *your entries* | | your components' ExternalSecrets |
 

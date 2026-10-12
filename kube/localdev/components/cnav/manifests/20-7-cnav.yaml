@@ -38,7 +38,7 @@ data:
       tool: postgres
       icon: 🐘
       link: /pgweb/
-      description: Postgres (pg/postgres-rw), app database
+      description: Postgres (postgres/postgres-rw), app database
     - component: NATS
       tool: nats
       icon: 📨
@@ -127,11 +127,11 @@ data:
         - name: Postgres
           tool: postgres
           checks:
-            - {kind: StatefulSet, namespace: pg, name: postgres}
+            - {kind: StatefulSet, namespace: postgres, name: postgres}
         - name: pgweb
           tool: postgres
           checks:
-            - {kind: Deployment, namespace: pg, name: pgweb}
+            - {kind: Deployment, namespace: postgres, name: pgweb}
         - name: NATS
           tool: nats
           checks:

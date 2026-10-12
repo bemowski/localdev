@@ -37,11 +37,11 @@ class FakeKube:
             "/api/v1/namespaces": {"items": [
                 {"metadata": {"name": "kube-system"}},
                 {"metadata": {"name": "default"}},
-                {"metadata": {"name": "pg", "labels": {agent.ADDON_LABEL: "abc"}}},
+                {"metadata": {"name": "postgres", "labels": {agent.ADDON_LABEL: "abc"}}},
                 {"metadata": {"name": "team-x", "labels": {"owner": "me"}}}]},
             "/apis/apps/v1/deployments": {"items": [
                 deployment("default", "web", "u1", 1, "nginx:1.27"),
-                deployment("pg", "pgweb", "u2", 1, "sosedoff/pgweb"),
+                deployment("postgres", "pgweb", "u2", 1, "sosedoff/pgweb"),
                 deployment("kube-system", "coredns", "u3", 1, "coredns")]},
         }
 

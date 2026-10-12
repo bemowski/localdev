@@ -176,10 +176,10 @@ The OpenTelemetry Operator (zero-code auto-instrumentation through a pod annotat
 
 ## Postgres
 
-Postgres 18 is a single-instance StatefulSet in namespace `pg` (`components/postgres/manifests/30-2-postgres.yaml`), with no operator.
+Postgres 18 is a single-instance StatefulSet in namespace `postgres` (`components/postgres/manifests/30-2-postgres.yaml`), with no operator.
 - **Credentials** (fixed, dev only): user `app`, password `localdev`, database `app`.
-- **In-cluster connection:** host `postgres-rw.pg.svc:5432`. The Secret `postgres-app` has the keys `username`, `password`, `dbname`, `host`, `port`, `uri` and `jdbc-uri`.
-- **From your desktop:** `postgresql://app:localdev@localhost:5432/app`, always on while postgres is installed (Service `pg/postgres-local`, bound to 127.0.0.1).
+- **In-cluster connection:** host `postgres-rw.postgres.svc:5432`. The Secret `postgres-app` has the keys `username`, `password`, `dbname`, `host`, `port`, `uri` and `jdbc-uri`.
+- **From your desktop:** `postgresql://app:localdev@localhost:5432/app`, always on while postgres is installed (Service `postgres/postgres-local`, bound to 127.0.0.1).
 - **Web UI:** `/pgweb/`. Each app has its **own database** on this server (e.g. `app`, `keycloak`), not a schema in `app`.
   - pgweb runs with `--sessions`, so **every browser tab or window has its own connection**. pgweb's default is a single connection shared by everyone.
   - A new tab opens on the connect screen: choose a **Bookmark**, then click Connect. To switch databases within a tab, click the current database's name at the top of the left sidebar and pick another in the search box that opens.
@@ -264,7 +264,7 @@ Keycloak 26 runs in namespace `keycloak` (`components/keycloak/manifests/30-6-ke
   curl -s http://localhost/keycloak/realms/localdev/protocol/openid-connect/token \
     -d grant_type=password -d client_id=demo-app -d username=alice -d password=password | jq -r .access_token
   ```
-- **Data** lives in database `keycloak` on `pg/postgres`, which an init container creates. It survives `cluster:recreate`.
+- **Data** lives in database `keycloak` on `postgres/postgres`, which an init container creates. It survives `cluster:recreate`.
 - **Metrics:** Keycloak is scraped via the `metrics: enabled` label. User-event metrics and HTTP latency histograms are on. Dashboards are in `tools/`.
 - **Resources:** about 0.5–0.7 GiB of memory, and roughly 30–60 seconds to start.
 

@@ -42,7 +42,7 @@ Turn the app into a [component](building-a-component.md): a small folder with it
 | `volumes:` (data) | a `hostPath` under `/runtime.data/<name>` (kept across rebuilds), or `emptyDir` |
 | `depends_on:` | not needed: Kubernetes restarts until dependencies answer. For order, an init container that waits |
 | `healthcheck:` | `readinessProbe` / `livenessProbe` |
-| networks, service names | DNS: `<service>.<namespace>.svc`, e.g. `postgres-rw.pg.svc:5432`, `nats.nats.svc:4222` |
+| networks, service names | DNS: `<service>.<namespace>.svc`, e.g. `postgres-rw.postgres.svc:5432`, `nats.nats.svc:4222` |
 | `profiles:` | `profiles.toml` (or your `local.toml`) |
 | `docker compose up` / `down` | `mise run cluster:create` / `cluster:destroy` (or `cluster:profile` to add/remove) |
 | `docker compose build` | `mise run build <name>` |
@@ -86,7 +86,7 @@ spec:
           image: localdev-registry:5005/api:latest
           imagePullPolicy: Always
           env:
-            - {name: DB_URL, value: "postgres://app:localdev@postgres-rw.pg.svc:5432/app"}
+            - {name: DB_URL, value: "postgres://app:localdev@postgres-rw.postgres.svc:5432/app"}
           readinessProbe: {httpGet: {path: /health, port: 8080}}
 ```
 

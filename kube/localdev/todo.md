@@ -12,9 +12,9 @@
   - jenkins --> localdev
   - sortation --> localdev
 
+  - create a helm template - as opposed to "horizon operator"
+
 * Formalize the "component" 
   - are there existing constructs
   - simple -> complex
-
-* Try to deploy jenkins on localdev
 

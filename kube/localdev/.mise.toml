@@ -212,7 +212,7 @@ kubectl get externalsecrets -A 2>/dev/null
 [tasks."pg:psql"]
 description = "psql shell in the postgres pod (as app, db app)"
 raw = true
-run = "kubectl -n pg exec -it statefulset/postgres -- psql -U app app"
+run = "kubectl -n postgres exec -it statefulset/postgres -- psql -U app app"
 
 # --- grafana dashboards (grafana/dashboards/<folder>/*.json, provisioned live) ---------
 # list/export talk to Grafana through a temporary port-forward; import/fetch only write files.

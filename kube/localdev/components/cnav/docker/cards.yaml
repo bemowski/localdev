@@ -20,7 +20,7 @@
 - component: pgweb
   icon: 🐘
   link: /pgweb/
-  description: Postgres (pg/postgres-rw), app database
+  description: Postgres (postgres/postgres-rw), app database
 - component: NATS
   icon: 📨
   link: /nats/

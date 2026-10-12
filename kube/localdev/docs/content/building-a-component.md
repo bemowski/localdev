@@ -212,8 +212,8 @@ your component's `secrets.defaults.toml`), and annotate the Deployment for Reloa
 
 ## Databases and other setup
 
-Postgres runs in namespace `pg` with fixed local credentials (`app` / `localdev`); from a component,
-connect to `postgres-rw.pg.svc:5432`. NATS is `nats.nats.svc:4222`.
+Postgres runs in namespace `postgres` with fixed local credentials (`app` / `localdev`); from a component,
+connect to `postgres-rw.postgres.svc:5432`. NATS is `nats.nats.svc:4222`.
 
 To create your own database today, use an **init container** that waits for Postgres and creates it
 idempotently, as the Keycloak component does (`components/keycloak/manifests/30-6-keycloak.yaml`):
@@ -223,7 +223,7 @@ idempotently, as the Keycloak component does (`components/keycloak/manifests/30-
         - name: create-db
           image: postgres:18.6
           env:
-            - {name: PGHOST, value: postgres-rw.pg.svc}
+            - {name: PGHOST, value: postgres-rw.postgres.svc}
             - {name: PGUSER, value: app}
             - {name: PGPASSWORD, value: localdev}
             - {name: PGDATABASE, value: app}
@@ -292,7 +292,7 @@ spec:
             - name: MyApp
               uid: myapp-pg                 # stable: dashboards refer to the datasource by uid
               type: grafana-postgresql-datasource
-              url: postgres-rw.pg.svc:5432
+              url: postgres-rw.postgres.svc:5432
               user: {{ .username }}
               jsonData: {database: myapp, sslmode: disable, postgresVersion: 1500}
               secureJsonData: {password: "{{ .password }}"}
