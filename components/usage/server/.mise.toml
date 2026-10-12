@@ -5,11 +5,14 @@
 #   mise run dev     run locally on :8080 against localdev's Postgres (database `usage`, created in-cluster)
 #   mise run image   build the image (IMAGE=usage-server:dev); in localdev: `mise run build usage`
 #   mise run db-init re-run the database init Job in localdev (after a password change; idempotent)
+#   mise run release build linux/amd64, push $USAGE_REPO:<VERSION>, tag git usage-server-v<VERSION>. Needs a
+#                    clean tree, an unused VERSION and `gcloud auth configure-docker us-central1-docker.pkg.dev`
 
 [tools]
 uv = '0.12.24'
 
 [env]
+USAGE_REPO = "us-central1-docker.pkg.dev/scs-d-common-nonprod/docker-registry/tools/cluster/usage/server"
 _UV_RUN = "uv run --no-project --python 3.13 --with-requirements docker/requirements.txt"
 
 [tasks.test]
@@ -37,4 +40,21 @@ kubectl -n usage delete job usage-db-init --ignore-not-found
 kubectl apply -f manifests/50-2-1-usage-db-init.yaml
 kubectl -n usage wait --for=condition=complete job/usage-db-init --timeout=180s
 kubectl -n usage logs job/usage-db-init --tail=3
+"""
+
+[tasks.release]
+description = "Build and push the server image for VERSION, then tag git"
+dir = "{{config_root}}"
+run = """
+set -euo pipefail
+ver="$(tr -d '[:space:]' < VERSION)"
+image="$USAGE_REPO:$ver"
+tag="usage-server-v$ver"
+if [ -n "$(git status --porcelain -- ..)" ]; then echo "uncommitted changes under components/usage: commit first" >&2; exit 1; fi
+if git rev-parse -q --verify "refs/tags/$tag" >/dev/null; then echo "git tag $tag exists: bump VERSION" >&2; exit 1; fi
+if docker manifest inspect "$image" >/dev/null 2>&1; then echo "$image already pushed: bump VERSION" >&2; exit 1; fi
+IMAGE="$image" PLATFORM=linux/amd64 ./build.sh
+docker push "$image"
+git tag -a "$tag" -m "usage server $ver ($image)"
+echo "pushed $image, tagged $tag (share it: git push origin $tag)"
 """

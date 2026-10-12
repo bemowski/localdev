@@ -83,6 +83,7 @@ can't drift from the spec. Each batch is written in one transaction:
 | Grafana | datasource **Usage** (uid `usage-pg`, read-only), provisioned through an ExternalSecret in `monitoring` |
 | metrics | `usage_events_total{type,result}`, `usage_batches_total{status}` on port `metrics` (9090) |
 | logs | logfmt, one line per batch |
+| image | `us-central1-docker.pkg.dev/scs-d-common-nonprod/docker-registry/tools/cluster/usage/server:<VERSION>`, version in `server/VERSION`. `mise run release` builds linux/amd64, pushes it and tags git `usage-server-v<VERSION>`; it refuses a dirty tree or a version already pushed. Shared clusters deploy it from argo-app-of-apps (`cluster-workloads/usage`) |
 
 ```bash
 cd server
@@ -90,6 +91,7 @@ mise run test     # validation tests + API tests on a throwaway DB (localdev Pos
 mise run dev      # run locally on :8080 against localdev's `usage` database
 mise run db-init  # re-run the database init Job in localdev (idempotent; e.g. after a password change)
 mise run image    # docker build (standalone: IMAGE=usage-server:dev)
+mise run release  # bump VERSION and commit first; builds, pushes and tags (gcloud auth configure-docker us-central1-docker.pkg.dev)
 ```
 
 `server/` layout: `manifests/` (applied by k3s), `docker/` (Dockerfile, requirements, `usage_server/`
