@@ -234,7 +234,7 @@ metadata:
   name: cnav
   namespace: cnav
 ---
-# read-only: just what /cnav/api/status, /cnav/api/ports and /cnav/api/events look at
+# read-only: just what /cnav/api/status, /cnav/api/ports, /cnav/api/routes and /cnav/api/events look at
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
@@ -266,6 +266,12 @@ rules:
     verbs: [list]
   - apiGroups: [""]                   # /cnav/api/events fallback while Loki isn't answering
     resources: [events]
+    verbs: [list]
+  - apiGroups: ["networking.k8s.io"]  # /cnav/api/routes: the ingress map
+    resources: [ingresses]
+    verbs: [list]
+  - apiGroups: ["traefik.io"]         # ... Traefik's own routes, and middlewares (which auth)
+    resources: [ingressroutes, middlewares]
     verbs: [list]
 ---
 apiVersion: rbac.authorization.k8s.io/v1

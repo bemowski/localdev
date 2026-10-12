@@ -3,7 +3,8 @@
 Serves the static page, the config files (cards.yaml, status.yaml),
 /cnav/api/status, which evaluates status.yaml against the Kubernetes API using the
 pod's service account, /cnav/api/ports, the host ports k3d.yaml exposes and what
-answers them in the cluster, /cnav/api/events, cluster events from Loki (72h, shipped
+answers them in the cluster, /cnav/api/routes, every Ingress / IngressRoute with its host, path,
+backend and auth (sso, api-key, open), /cnav/api/events, cluster events from Loki (72h, shipped
 by Alloy) or, while Loki doesn't answer, from the Kubernetes API (last hour), and
 /cnav/api/credentials, logins for things not behind SSO (credentials.yaml + the secret store;
 values only from /cnav/api/credentials/<id>, when the page reveals one).
@@ -449,6 +450,118 @@ def ports():
     return {"updated": datetime.now(timezone.utc).isoformat(timespec="seconds"), "ports": out}
 
 
+# --- routes: every Ingress and Traefik IngressRoute, with who may call it ----
+
+MW_ANNOTATION = "traefik.ingress.kubernetes.io/router.middlewares"
+AUTH_ORDER = ("sso", "api-key", "forward-auth", "basic-auth")   # the gate a route reports, first found
+TRAEFIK_SVC = ("kube-system", "traefik")                         # a route back into Traefik: a re-route
+
+
+def middleware_info(m):
+    """A Traefik Middleware -> {kind, detail}. kind: sso (oauth2-proxy), api-key (api-auth), another
+    auth, or the spec's own type (stripPrefix, headers, redirectRegex, ...)."""
+    spec = m.get("spec") or {}
+    address = (spec.get("forwardAuth") or {}).get("address", "")
+    if address:
+        kind = "sso" if "oauth2-proxy" in address else "api-key" if "api-auth" in address else "forward-auth"
+        return {"kind": kind, "detail": address}
+    if "basicAuth" in spec or "digestAuth" in spec:
+        return {"kind": "basic-auth", "detail": ""}
+    kind = next(iter(spec), "other")
+    body = spec.get(kind) or {}
+    if kind == "stripPrefix":
+        return {"kind": kind, "detail": "strip " + " ".join(body.get("prefixes") or [])}
+    if kind == "headers" and (body.get("customRequestHeaders") or {}).get("Host"):
+        return {"kind": kind, "detail": f"Host: {body['customRequestHeaders']['Host']}"}
+    return {"kind": kind, "detail": kind}
+
+
+def match_parts(match):
+    """IngressRoute match -> (host or None, path or None, exact). Only the simple forms localdev uses;
+    anything else keeps the raw rule as the path."""
+    host = re.search(r"Host\(`([^`]+)`\)", match)
+    prefix = re.search(r"PathPrefix\(`([^`]+)`\)", match)
+    exact = re.search(r"Path\(`([^`]+)`\)", match)
+    path = prefix.group(1) if prefix else exact.group(1) if exact else None
+    if path is None and not host:
+        path = match
+    return (host.group(1) if host else None), path, bool(exact and not prefix)
+
+
+def routes():
+    """Every route Traefik serves: host, path, auth (sso | api-key | open | ...), backend, middlewares.
+    Read live from the cluster, so it follows profile switches."""
+    kube = Kube()
+    mws = {}
+    for m in (kube.get("/apis/traefik.io/v1alpha1/middlewares") or {}).get("items", []):
+        mws[(m["metadata"]["namespace"], m["metadata"]["name"])] = middleware_info(m)
+    by_ref = {f"{ns}-{name}@kubernetescrd": info for (ns, name), info in mws.items()}
+
+    ready_cache = {}
+
+    def backend_ready(ns, name):
+        if (ns, name) not in ready_cache:
+            try:
+                ready_cache[(ns, name)] = endpoints_ready(kube, ns, name)
+            except Exception as e:  # a missing Service: shown as not ready
+                log.debug("endpoints of %s/%s: %s", ns, name, e)
+                ready_cache[(ns, name)] = (0, 0)
+        return ready_cache[(ns, name)]
+
+    def row(kind, ns, name, host, path, exact, middlewares, svc_ns, svc, port, link, priority=None):
+        kinds = [m["kind"] for m in middlewares]
+        auth = next((a for a in AUTH_ORDER if a in kinds), "open")
+        extras = [m["detail"] for m in middlewares if m["kind"] not in AUTH_ORDER]
+        reroute = next((m["detail"].split(": ", 1)[1] for m in middlewares
+                        if m["kind"] == "headers" and m["detail"].startswith("Host: ")), None) \
+            if (svc_ns, svc) == TRAEFIK_SVC else None
+        if reroute and auth == "open":
+            auth = "re-route"     # the target host's routes decide (e.g. each API's own key)
+        ready, total = backend_ready(svc_ns, svc) if svc else (0, 0)
+        return {"source": kind, "namespace": ns, "name": name, "host": host, "path": path or "/",
+                "exact": exact, "auth": auth, "middlewares": extras, "priority": priority,
+                "backend": {"namespace": svc_ns, "service": svc, "port": port},
+                "reroute": reroute, "ready": ready, "endpoints": total,
+                "state": "green" if ready or reroute else "red", "link": link}
+
+    out = []
+    for ing in (kube.get("/apis/networking.k8s.io/v1/ingresses") or {}).get("items", []):
+        meta = ing["metadata"]
+        ns = meta["namespace"]
+        refs = [r.strip() for r in (meta.get("annotations") or {}).get(MW_ANNOTATION, "").split(",") if r.strip()]
+        middlewares = [by_ref.get(r, {"kind": "missing", "detail": f"{r} (missing)"}) for r in refs]
+        for rule in (ing.get("spec") or {}).get("rules") or []:
+            for p in ((rule.get("http") or {}).get("paths")) or []:
+                svc = (p.get("backend") or {}).get("service") or {}
+                port = (svc.get("port") or {}).get("name") or (svc.get("port") or {}).get("number")
+                out.append(row("Ingress", ns, meta["name"], rule.get("host"), p.get("path"),
+                               p.get("pathType") == "Exact", middlewares, ns, svc.get("name"), port,
+                               f"{HEADLAMP}/ingresses/{ns}/{meta['name']}"))
+    for ir in (kube.get("/apis/traefik.io/v1alpha1/ingressroutes") or {}).get("items", []):
+        meta = ir["metadata"]
+        ns = meta["namespace"]
+        for r in (ir.get("spec") or {}).get("routes") or []:
+            host, path, exact = match_parts(r.get("match", ""))
+            middlewares = [mws.get((m.get("namespace") or ns, m["name"]),
+                                   {"kind": "missing", "detail": f"{m['name']} (missing)"})
+                           for m in r.get("middlewares") or []]
+            svc = (r.get("services") or [{}])[0]
+            out.append(row("IngressRoute", ns, meta["name"], host, path, exact, middlewares,
+                           svc.get("namespace") or ns, svc.get("name"), svc.get("port"), None,
+                           priority=r.get("priority")))
+
+    # a re-route (e.g. localhost/api/* -> api.localhost) makes every route on its target host
+    # reachable under its prefix too: list that alias on those routes
+    for rr in [r for r in out if r["reroute"]]:
+        prefix = rr["path"].rstrip("/")
+        for r in out:
+            if r["host"] == rr["reroute"] and r["path"] != "/":
+                r.setdefault("aliases", []).append(f"{rr['host'] or 'localhost'}{prefix}{r['path']}")
+
+    out.sort(key=lambda r: (r["host"] is not None, r["host"] or "", r["path"] == "/", r["path"]))
+    return {"updated": datetime.now(timezone.utc).isoformat(timespec="seconds"), "routes": out}
+
+
 # --- events -----------------------------------------------------------------
 
 EVENTS_QUERY = '{job="loki.source.kubernetes_events"}'   # Alloy, 20-3-logging.yaml
@@ -778,6 +891,12 @@ class Handler(SimpleHTTPRequestHandler):
             except Exception as e:
                 log.exception("/cnav/api/ports failed")
                 return self.send_json(503, {"error": str(e)})
+        if path == "/cnav/api/routes":
+            try:
+                return self.send_json(200, routes())
+            except Exception as e:
+                log.exception("/cnav/api/routes failed")
+                return self.send_json(503, {"error": str(e)})
         if path == "/cnav/api/events":
             try:
                 query = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
@@ -819,7 +938,7 @@ class Handler(SimpleHTTPRequestHandler):
         return super().do_GET()
 
     # access log: errors loud, the page's own 10-second polling and probes only at debug
-    QUIET = ("/healthz", "/cnav/api/status", "/cnav/api/ports", "/cnav/api/events")
+    QUIET = ("/healthz", "/cnav/api/status", "/cnav/api/ports", "/cnav/api/routes", "/cnav/api/events")
 
     def log_request(self, code="-", size="-"):
         try:

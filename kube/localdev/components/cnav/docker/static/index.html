@@ -187,7 +187,7 @@
   .dot.red { background: var(--red); box-shadow: 0 0 0 3px color-mix(in srgb, var(--red) 25%, transparent); }
 
   /* row under the cards: ports (left) | events (right), each about a quarter of the screen high */
-  /* under the cards, full width of main: one card, three tabs (events | ports | credentials) */
+  /* under the cards, full width of main: one card, four tabs (events | ports | ingress | credentials) */
   .dock {
     display: flex; flex-direction: column; min-width: 0; height: 32vh; min-height: 220px; margin-top: 24px;
     padding: 12px 18px 14px; background: var(--card); border: 1px solid var(--border); border-radius: 12px;
@@ -205,6 +205,31 @@
   }
   .tab:hover, .tab:focus-visible { color: var(--text); outline: none; }
   .tab[aria-selected="true"] { color: var(--text); background: var(--panel); }
+  .routes { width: 100%; border-collapse: collapse; font-size: 13px; }
+  .routes td { padding: 5px 8px; border-top: 1px solid var(--border); vertical-align: top; white-space: nowrap; }
+  .routes td:first-child { padding-left: 0; }
+  .routes tr.host td { border-top: 0; padding: 12px 0 4px; font: 600 13px ui-monospace, SFMono-Regular, Menlo, monospace; }
+  .routes tr.host:first-child td { padding-top: 0; }
+  .routes tr.host .sub { font: 400 12px system-ui, sans-serif; color: var(--muted); margin-left: 8px; }
+  .routes td.dotcell { width: 12px; padding-right: 0; padding-top: 9px; }
+  .routes .path { font: 13px ui-monospace, SFMono-Regular, Menlo, monospace; }
+  .routes .path a { color: inherit; text-decoration: none; }
+  .routes .path a:hover { color: var(--accent); }
+  .routes .arrow { color: var(--muted); width: 1em; }
+  .routes .dest { width: 100%; white-space: normal; }
+  .routes .ns { color: var(--muted); font: 12px ui-monospace, SFMono-Regular, Menlo, monospace; }
+  .routes .ns::after { content: " / "; opacity: .6; }
+  .routes .mono { font: 12px ui-monospace, SFMono-Regular, Menlo, monospace; color: var(--muted); }
+  .routes .sub { display: block; color: var(--muted); font-size: 12px; }
+  .auth {
+    display: inline-block; min-width: 56px; text-align: center; padding: 0 7px; border-radius: 999px;
+    font: 600 11px/18px system-ui, sans-serif; border: 1px solid currentColor;
+  }
+  .auth.sso { color: var(--green); }
+  .auth.api-key { color: var(--accent); }
+  .auth.open { color: var(--amber); }
+  .auth.re-route { color: var(--muted); }
+  .auth.other { color: var(--muted); }
   .creds { width: 100%; border-collapse: collapse; font-size: 13px; }
   .creds td { padding: 5px 6px; border-top: 1px solid var(--border); vertical-align: top; }
   .creds td:first-child { padding-left: 0; }
@@ -308,10 +333,12 @@
         <div class="tabs" role="tablist">
           <button class="tab" role="tab" data-tab="events" aria-selected="true" aria-controls="pane-events">Events</button>
           <button class="tab" role="tab" data-tab="ports" aria-selected="false" aria-controls="pane-ports">Ports</button>
+          <button class="tab" role="tab" data-tab="routes" aria-selected="false" aria-controls="pane-routes">Ingress</button>
           <button class="tab" role="tab" data-tab="creds" aria-selected="false" aria-controls="pane-creds">Credentials</button>
         </div>
         <span class="dock-sub" data-for="events" id="events-sub"></span>
         <span class="dock-sub" data-for="ports" hidden>exposed on this machine (k3d.yaml) → what answers in the cluster</span>
+        <span class="dock-sub" data-for="routes" hidden>every route Traefik serves: host + path → backend, and who may call it</span>
         <span class="dock-sub" data-for="creds" hidden>logins not behind SSO, from the secret store</span>
         <div class="dock-tools" data-for="events">
           <label class="dock-toggle" title="Only problems: crash, image, unhealthy, restart, warning (red and amber)">
@@ -332,6 +359,9 @@
         </div>
         <div id="pane-ports" role="tabpanel" hidden>
           <table class="ports"><tbody id="ports"><tr><td class="mono">loading…</td></tr></tbody></table>
+        </div>
+        <div id="pane-routes" role="tabpanel" hidden>
+          <table class="routes"><tbody id="routes"><tr><td class="mono">loading…</td></tr></tbody></table>
         </div>
         <div id="pane-creds" role="tabpanel" hidden>
           <table class="creds"><tbody id="creds"><tr><td class="mono">loading…</td></tr></tbody></table>
@@ -548,6 +578,97 @@
     }
   }
 
+  // --- ingress map ---
+  const AUTH_TITLES = {
+    sso: 'behind localdev SSO (oauth2-proxy): sign in with Google or the local admin',
+    'api-key': 'API key required (api-auth): Authorization: Bearer <key> or X-API-Key: <key>',
+    open: 'no authentication: anyone who can reach localhost',
+    're-route': 'handed back to Traefik under another host: that host\'s routes decide (e.g. each API\'s key)',
+  };
+  function routeHref(r) {
+    if (r.exact === false && r.path.includes('(')) return null;   // a raw rule, not a path
+    return r.host ? `http://${r.host}${r.path}` : r.path;
+  }
+  function renderRoutes(data) {
+    const body = document.getElementById('routes');
+    body.replaceChildren();
+    let lastHost;
+    for (const r of data.routes) {
+      if (r.host !== lastHost) {
+        lastHost = r.host;
+        const tr = el('tr', 'host');
+        const td = el('td', '', r.host || 'localhost');
+        td.colSpan = 5;
+        td.append(el('span', 'sub', r.host ? 'host rule' : 'no host rule: any host, e.g. localhost, 127.0.0.1'));
+        tr.append(td);
+        body.append(tr);
+      }
+      const tr = el('tr');
+      const dot = el('td', 'dotcell');
+      const d = el('span', `dot ${r.state}`);
+      d.title = r.reroute ? 're-route' : `backend: ${r.ready}/${r.endpoints} endpoints ready`;
+      dot.append(d);
+      const auth = el('td');
+      const badge = el('span', `auth ${AUTH_TITLES[r.auth] ? r.auth : 'other'}`, r.auth);
+      badge.title = AUTH_TITLES[r.auth] || r.auth;
+      auth.append(badge);
+      const path = el('td', 'path');
+      const href = routeHref(r);
+      const shown = r.path + (r.exact ? '' : (r.path.endsWith('/') ? '*' : '/*'));
+      if (href) {
+        const a = el('a', '', shown);
+        a.href = href; a.target = '_blank'; a.rel = 'noopener';
+        a.title = r.exact ? 'exact path' : 'this path and everything under it';
+        path.append(a);
+      } else {
+        path.append(document.createTextNode(shown));
+      }
+      const dest = el('td', 'dest');
+      if (r.reroute) {
+        dest.append(el('span', 'mono', `↻ re-routed into Traefik as ${r.reroute}`));
+      } else if (r.backend.service) {
+        dest.append(el('span', 'ns', r.backend.namespace), document.createTextNode(r.backend.service),
+                    el('span', 'mono', r.backend.port != null ? ` :${r.backend.port}` : ''));
+      }
+      const notes = [`${r.source} ${r.namespace}/${r.name}`];
+      if (r.path === '/' && !r.exact) notes.push('catch-all: paths no other route on this host claims');
+      if (r.priority != null) notes.push(`priority ${r.priority}`);
+      if (r.middlewares.length) notes.push(r.middlewares.join(', '));
+      const sub = el('span', 'sub');
+      if (r.link) {
+        const a = el('a', '', notes[0]);
+        a.href = r.link; a.title = 'Open in Headlamp';
+        a.style.color = 'inherit';
+        sub.append(a, document.createTextNode(notes.length > 1 ? ' · ' + notes.slice(1).join(' · ') : ''));
+      } else {
+        sub.textContent = notes.join(' · ');
+      }
+      dest.append(sub);
+      if (r.aliases) dest.append(el('span', 'sub', `also at ${r.aliases.join(', ')}`));
+      if (!r.reroute && r.state === 'red') dest.append(el('span', 'sub', r.backend.service ? 'no ready endpoints' : 'no backend'));
+      tr.append(dot, auth, path, el('td', 'arrow', '→'), dest);
+      body.append(tr);
+    }
+    if (!data.routes.length) {
+      const tr = el('tr');
+      tr.append(el('td', 'mono', 'no routes'));
+      body.append(tr);
+    }
+  }
+
+  async function refreshRoutes() {
+    try {
+      const r = checkAuth(await fetch('cnav/api/routes', { cache: 'no-store' }));
+      const data = await r.json();
+      if (!r.ok) throw new Error(data.error || `HTTP ${r.status}`);
+      renderRoutes(data);
+    } catch (err) {
+      const tr = el('tr');
+      tr.append(el('td', 'mono', `routes unavailable: ${err.message}`));
+      document.getElementById('routes').replaceChildren(tr);
+    }
+  }
+
   // --- ports | credentials tabs ---
   const ICONS = {
     eye: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></svg>',
@@ -564,7 +685,7 @@
     return b;
   }
 
-  const TABS = ['events', 'ports', 'creds'];
+  const TABS = ['events', 'ports', 'routes', 'creds'];
   function showTab(name) {
     if (!TABS.includes(name)) name = 'events';
     for (const b of document.querySelectorAll('.tab')) b.setAttribute('aria-selected', String(b.dataset.tab === name));
@@ -572,6 +693,7 @@
     for (const x of document.querySelectorAll('.dock-head [data-for]')) x.hidden = x.dataset.for !== name;
     try { localStorage.setItem('cnav.dock.tab', name); } catch {}
     if (name === 'creds') refreshCredentials();
+    if (name === 'routes') refreshRoutes();
   }
   for (const b of document.querySelectorAll('.tab')) b.addEventListener('click', () => showTab(b.dataset.tab));
 
@@ -805,6 +927,7 @@
     const btn = document.getElementById('refresh');
     btn.classList.add('spinning');
     refreshPorts();   // same cycle; each renders on its own when done
+    if (!document.getElementById('pane-routes').hidden) refreshRoutes();
     refreshEvents();
     try {
       const r = checkAuth(await fetch('cnav/api/status', { cache: 'no-store' }));
