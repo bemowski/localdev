@@ -38,6 +38,23 @@ Everything with a UI is an Ingress on a path of `http://localhost/`. Each namesp
 Middleware that asks oauth2-proxy whether the request is signed in, so every app is behind the same
 sign-in: Google (allow-listed accounts) or the local `admin` user.
 
+### The API host: `http://api.localhost/<name>/`
+
+APIs that tools, scripts and other services call (not browsers) go on a second host, without SSO.
+Each is either **open** or protected by **its own API keys**: an Ingress with `host: api.localhost`,
+plus the shared `api-key` Middleware for a keyed API. Clients send `Authorization: Bearer <key>` or
+`X-API-Key: <key>`; the keys are the secret store entry `api-<name>`. Paths no API claims answer a
+JSON 404, so the browser routes above aren't reachable through `api.localhost`.
+
+The check is a small service, api-auth (`components/api-auth/`, always on). Traefik still does the
+routing, and asks api-auth about keys the way it asks oauth2-proxy about sign-ins. Its readme
+(`components/api-auth/readme.md`) explains what it does and why; to add an API, see
+[Building a component](building-a-component.md#an-api-on-apilocalhost).
+
+`*.localhost` resolves to this machine in browsers, curl and on Linux; on macOS other clients may
+need `127.0.0.1 api.localhost` in `/etc/hosts`. Inside the cluster, call the Service
+(`http://<svc>.<namespace>.svc`) instead: no key needed.
+
 ## Manifest rules
 
 - **Each file creates the namespace(s) it uses**, and HelmCharts set `createNamespace: true`, so a

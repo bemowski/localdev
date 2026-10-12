@@ -1,4 +1,5 @@
 # SSO test app at /whoami — echoes request headers (look for X-Auth-Request-Email)
+# ... and the API-key example: http://api.localhost/whoami/ (keys: [api-whoami] in secrets.defaults.toml)
 apiVersion: v1
 kind: Namespace
 metadata:
@@ -62,6 +63,28 @@ metadata:
 spec:
   rules:
     - http:
+        paths:
+          - path: /whoami
+            pathType: Prefix
+            backend:
+              service:
+                name: whoami
+                port:
+                  number: 80
+---
+# The same app as a keyed API: curl -H 'Authorization: Bearer localdev-whoami-key' http://api.localhost/whoami/
+# api-key (namespace api) checks the key against secret store entry api-whoami, then the prefix is stripped.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: whoami-api
+  namespace: demo
+  annotations:
+    traefik.ingress.kubernetes.io/router.middlewares: api-key@kubernetescrd,demo-strip@kubernetescrd
+spec:
+  rules:
+    - host: api.localhost
+      http:
         paths:
           - path: /whoami
             pathType: Prefix

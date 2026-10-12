@@ -685,7 +685,8 @@ def store_entries():
 
 
 def credential_rows(entries):
-    """Curated rows (credentials.yaml, for the profile) + any other store entry with a password."""
+    """Curated rows (credentials.yaml, for the profile) + any other store entry with a password or
+    an API key (api-<name> entries: keys for http://api.localhost/<name>/, see components/api-auth)."""
     try:
         curated = for_profile(yaml.safe_load((CONFIG_DIR / "credentials.yaml").read_text()) or [])
     except OSError:
@@ -700,8 +701,11 @@ def credential_rows(entries):
                      "entry": c.get("entry"), "source": "static" if "static" in c else "entry",
                      "values": values, "extras": c.get("extras") or {}})
     for entry, values in sorted(entries.items()):
-        if entry not in used and "password" in values:
-            rows.append({"id": slug(f"store-{entry}"), "name": entry, "where": None, "note": None,
+        api = entry.startswith("api-") and any(k.startswith("api-key") for k in values)
+        if entry not in used and ("password" in values or api):
+            rows.append({"id": slug(f"store-{entry}"), "name": entry,
+                         "where": f"http://api.localhost/{entry[4:]}/" if api else None,
+                         "note": "API key: Authorization: Bearer <key> or X-API-Key: <key>" if api else None,
                          "entry": entry, "source": "discovered", "values": values, "extras": {}})
     return rows
 

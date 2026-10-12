@@ -7,6 +7,7 @@ one folder, `components/<name>/` in this repo, or a folder in your own project r
 | component | what | in profiles |
 |---|---|---|
 | cnav | cluster navigator at `/` | all (always on, infra layer) |
+| api-auth | the API host `http://api.localhost/<name>/`: API-key check for keyed APIs, 404 for unknown paths (`components/api-auth/readme.md`) | all (always on, infra layer) |
 | external-secrets | External Secrets Operator, Reloader, the `localdev` secret store | all (always on, infra layer) |
 | usage-agent | sends this cluster's usage events (created, heartbeat, profile changed, app deployed) to a usage server; spools when there's none. External: `kube/components/usage/cluster-agent` | all (always on, infra layer) |
 | postgres | Postgres + pgweb (`/pgweb`) | dev, knative, full |

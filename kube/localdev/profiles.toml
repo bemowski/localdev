@@ -37,6 +37,10 @@ path = "../components/usage/cluster-agent"   # external: lives with the usage pr
 layer = "infra"                              # kube-system; sends this cluster's usage events
 always = true                                # every profile, with or without a usage server (it spools)
 
+[components.api-auth]
+layer = "infra"                # http://api.localhost/<api>/: API-key check + catch-all (readme.md)
+always = true
+
 [components.external-secrets]
 layer = "infra"                # apps' ExternalSecrets need it; local store: secrets.store.toml
 always = true

@@ -18,3 +18,12 @@
   - are there existing constructs
   - simple -> complex
 
+  - build a docker image, deploy
+  - docker image needs secrets (how to handle secrets stores)
+  - docker image needs a postgres database  (Job for initialization)
+    - shared database in postgres namespace
+    - cnpg database creation, then use
+    - abstract init to Job
+  - docker image connects to nats jetstream
+  - docker image publishes an API outside the cluster
+

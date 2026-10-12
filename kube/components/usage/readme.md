@@ -39,7 +39,7 @@ mise run api:test     # lint + check
 | `GET` | `/healthz` | `{status: ok \| unavailable}` |
 | `GET` | `/openapi.yaml` | the spec |
 
-Base URL: `http://localhost/usage/api` (desktop) or `http://usage.usage.svc` (in the cluster).
+Base URL: `http://api.localhost/usage` (desktop) or `http://usage.usage.svc` (in the cluster).
 Clients read it from `USAGE_URL`.
 
 - **Write-only.** Reporting reads Postgres directly.
@@ -78,7 +78,7 @@ can't drift from the spec. Each batch is written in one transaction:
 | | |
 |---|---|
 | deploy | only while working on it, via your gitignored `kube/localdev/local.toml` (below), then `mise run cluster:profile usage`. `mise run build usage` rebuilds |
-| URLs | `http://localhost/usage/api` (public Ingress, prefix stripped), `http://usage.usage.svc` |
+| URLs | `http://api.localhost/usage` (localdev's API host, prefix stripped; open, no API key yet), `http://usage.usage.svc` |
 | database | `usage` on `postgres/postgres`. The init container creates roles `usage` (owner) and `usage_ro` (read-only, Grafana) from the secret store (`server/secrets.defaults.toml`). The server runs `usage_server/migrations/*.sql` at startup |
 | Grafana | datasource **Usage** (uid `usage-pg`, read-only), provisioned through an ExternalSecret in `monitoring` |
 | metrics | `usage_events_total{type,result}`, `usage_batches_total{status}` on port `metrics` (9090) |

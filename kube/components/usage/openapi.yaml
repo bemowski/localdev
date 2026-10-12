@@ -40,7 +40,7 @@ info:
     identifier: LicenseRef-Internal
 
 servers:
-  - url: http://localhost/usage/api
+  - url: http://api.localhost/usage
     description: localdev cluster, from the desktop
   - url: http://usage.usage.svc
     description: localdev cluster, from inside the cluster

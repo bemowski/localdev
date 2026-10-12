@@ -22,6 +22,7 @@ Today the store is **local**: no cloud account needed. Moving it to a cloud secr
 | `localdev-admin` | `username`, `password` | `auth/oauth2-proxy-htpasswd` (bcrypt line, built by ESO), `monitoring/grafana-admin`, `keycloak/keycloak-admin` |
 | `postgres-app` | `username`, `password`, `dbname` | `postgres/postgres-app` (+ `host`, `port`, `uri`, `jdbc-uri`), `keycloak/keycloak-db` |
 | `keycloak-db` | `username`, `password` | `keycloak/keycloak-db` |
+| `api-<name>` | `api-key` (and any other `api-key*`) | read directly by api-auth: the keys for `http://api.localhost/<name>/` (e.g. `api-whoami`) |
 | *your entries* | | your components' ExternalSecrets |
 
 ## Who can sign in

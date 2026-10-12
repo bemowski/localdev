@@ -198,6 +198,55 @@ row per component, with all its labelled workloads as checks, in the `apps` grou
 and goes with the workloads. (`status.yaml` in cnav's ConfigMap still lists the built-in tools; a
 component named by a `tool:` there isn't shown twice.)
 
+### An API on api.localhost
+
+For an API that tools or other services call, add an Ingress on the API host
+`http://api.localhost/<name>/` (no SSO; see [Routing and sign-in](cluster-layout.md#routing-and-sign-in)).
+Open API: just the strip. Keyed API: `api-key@kubernetescrd` first, since it reads the path before the strip.
+
+```yaml
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  name: api-strip
+  namespace: myapp
+spec:
+  stripPrefix:
+    prefixes: [/myapp]
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: myapp-api
+  namespace: myapp
+  annotations:
+    traefik.ingress.kubernetes.io/router.middlewares: api-key@kubernetescrd,myapp-api-strip@kubernetescrd
+spec:
+  rules:
+    - host: api.localhost
+      http:
+        paths:
+          - path: /myapp
+            pathType: Prefix
+            backend:
+              service: {name: myapp, port: {name: http}}
+```
+
+A keyed API's keys go in your `secrets.defaults.toml` as entry `api-<name>`; `mise run secrets:sync`
+applies them within seconds, and cnav's Credentials tab lists them (masked):
+
+```toml
+[api-myapp]                      # keys for http://api.localhost/myapp/
+api-key = "localdev-myapp-key"   # more keys: any name starting with api-key
+```
+
+```bash
+curl -H 'Authorization: Bearer localdev-myapp-key' http://api.localhost/myapp/...
+```
+
+A keyed API with no `api-<name>` entry rejects every request. The working example is `whoami`
+(`manifests/50-apps/50-1-whoami.yaml`).
+
 ### In cnav's events
 
 cnav's **Events** card shows your component's Kubernetes events (crashes, failing probes, image pulls,
@@ -353,4 +402,5 @@ from the UI.)
 2. `build.sh` (or `docker/`) producing `localdev-registry:5005/<name>:latest`.
 3. Registered: `local.toml` (external) or `profiles.toml` (in this repo); `python3 profile.py check`.
 4. `mise run cluster:profile <profile>`; the app is on `http://localhost/<name>/`.
+   Optional: an API on `http://api.localhost/<name>/` (open, or keyed with an `api-<name>` entry).
 5. Optional: a Grafana datasource (ExternalSecret in `monitoring`) and `dashboards/`.

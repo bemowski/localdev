@@ -1,6 +1,6 @@
 # usage server: write-only ingest of tool-usage events (../../openapi.yaml) into database `usage`
 # on postgres/postgres.
-#   desktop:     http://localhost/usage/api/v1/events     (public: no localdev SSO; internal only)
+#   desktop:     http://api.localhost/usage/v1/events     (the API host; open: no API key yet)
 #   in cluster:  http://usage.usage.svc/v1/events
 #   build:       mise run build usage   (server/build.sh)
 # The init container creates the server's role and database, and Grafana's read-only role, with
@@ -113,9 +113,11 @@ metadata:
   namespace: usage
 spec:
   stripPrefix:
-    prefixes: [/usage/api]
+    prefixes: [/usage]
 ---
-# Public (no sso middleware), like Keycloak's /keycloak/realms: clients are tools, not browsers.
+# On the API host (components/api-auth in kube/localdev): clients are tools, not browsers, so no SSO.
+# Open for now; to require API keys, put api-key@kubernetescrd first in the middlewares and add an
+# [api-usage] entry (api-key = "...") to server/secrets.defaults.toml.
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
@@ -125,9 +127,10 @@ metadata:
     traefik.ingress.kubernetes.io/router.middlewares: usage-strip@kubernetescrd
 spec:
   rules:
-    - http:
+    - host: api.localhost
+      http:
         paths:
-          - path: /usage/api
+          - path: /usage
             pathType: Prefix
             backend:
               service:

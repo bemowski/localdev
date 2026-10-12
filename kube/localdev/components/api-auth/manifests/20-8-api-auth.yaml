@@ -1,0 +1,111 @@
+# api-auth: the API host http://api.localhost/<api>/ (see components/api-auth/readme.md).
+#   Middleware api/key   forwardAuth API-key check; a component's Ingress adds api-key@kubernetescrd
+#   IngressRoute         api.localhost catch-all -> 404, so the host-less SSO routes (/grafana, ...)
+#                        aren't reachable through api.localhost
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: api
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: api-auth
+  namespace: api
+---
+# Reads the api-<name> entries of the secret store. RBAC can't limit to a name prefix; the server
+# only ever asks for api-* names.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: api-auth
+  namespace: secret-store
+rules:
+  - apiGroups: [""]
+    resources: [secrets]
+    verbs: [get]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: api-auth
+  namespace: secret-store
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: api-auth
+subjects:
+  - kind: ServiceAccount
+    name: api-auth
+    namespace: api
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: api-auth
+  namespace: api
+  labels: {app: api-auth, localdev/component: api-auth, localdev/status-group: infra}   # cnav status row
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {app: api-auth}
+  template:
+    metadata:
+      labels: {app: api-auth, localdev/component: api-auth}
+    spec:
+      serviceAccountName: api-auth
+      enableServiceLinks: false
+      containers:
+        - name: api-auth
+          image: localdev-registry:5005/api-auth:latest
+          imagePullPolicy: Always
+          env:
+            - {name: API_AUTH_LOG_LEVEL, value: INFO}   # DEBUG also logs accepted requests
+          ports:
+            - {name: http, containerPort: 8080}
+          readinessProbe:
+            httpGet: {path: /healthz, port: http}
+            initialDelaySeconds: 1
+            periodSeconds: 5
+          resources:
+            requests: {cpu: 5m, memory: 16Mi}
+            limits: {memory: 64Mi}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: api-auth
+  namespace: api
+spec:
+  selector: {app: api-auth}
+  ports:
+    - {name: http, port: 80, targetPort: http}
+---
+# The API-key check. In a component's Ingress (keys first: it reads the unstripped path):
+#   traefik.ingress.kubernetes.io/router.middlewares: api-key@kubernetescrd,<ns>-<strip>@kubernetescrd
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  name: key
+  namespace: api
+spec:
+  forwardAuth:
+    address: http://api-auth.api.svc.cluster.local/check
+---
+# Everything on api.localhost that no API claims. Traefik ranks routes by rule length unless given
+# a priority. 40 is this rule's own length: it outranks every host-less route (PathPrefix(`/grafana`)
+# and friends, all shorter), and loses to every API Ingress (Host(`api.localhost`) && PathPrefix(`/x`)
+# and longer).
+apiVersion: traefik.io/v1alpha1
+kind: IngressRoute
+metadata:
+  name: api-catch-all
+  namespace: api
+spec:
+  entryPoints: [web]
+  routes:
+    - match: Host(`api.localhost`) && PathPrefix(`/`)
+      priority: 40
+      kind: Rule
+      services:
+        - {name: api-auth, port: http}

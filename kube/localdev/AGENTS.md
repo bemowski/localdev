@@ -35,7 +35,7 @@ component. **Do not edit localdev's core to make one app work.**
 **Core (do not modify):**
 - `.mise.toml`, `profile.py`, `hostfacts.py`, `k3d.yaml`
 - `manifests/` (platform, infra, apps layers), `grafana/`, `registry/`
-- the built-in components: `components/{cnav,docs,external-secrets,postgres,nats,keycloak,knative}/`
+- the built-in components: `components/{api-auth,cnav,docs,external-secrets,postgres,nats,keycloak,knative}/`
 - `secrets.defaults.toml`, and `profiles.toml`. Adding a *shared* in-repo component there is a
   maintainer decision; propose it, don't just do it.
 
@@ -52,10 +52,11 @@ component. **Do not edit localdev's core to make one app work.**
 | deploy something | a YAML file in `manifests/` named `<layer number>-<n>-<name>.yaml` |
 | build an image | `build.sh` (any build tool; push `$IMAGE`) or a `docker/` folder with a Dockerfile |
 | a URL on `http://localhost/<name>/` | an Ingress with the `sso` Middleware (copy the guide's example) |
+| an API on `http://api.localhost/<name>/` (no SSO) | an Ingress with `host: api.localhost`; for API keys add the `api-key` Middleware and an `api-<name>` entry in your `secrets.defaults.toml` ([guide](docs/content/building-a-component.md#an-api-on-apilocalhost)) |
 | deploy after Postgres/NATS, in the right layer | `requires = [...]` and `layer = "..."` in `local.toml` |
 | a row in cnav's status column | label workloads `localdev/component: <name>` |
 | secrets | an ExternalSecret against ClusterSecretStore `localdev`, dev values in your `secrets.defaults.toml` |
-| a login shown in cnav's Credentials tab | a store entry with a `password` key (automatic) |
+| a login shown in cnav's Credentials tab | a store entry with a `password` key, or an `api-<name>` entry (automatic) |
 | roll pods when a secret changes | annotation `reloader.stakater.com/auto: "true"` |
 | a database / one-time setup | an idempotent init container (see the guide) |
 | a Grafana datasource or dashboards | a Secret labelled `grafana_datasource: "1"` in `monitoring`; `dashboards/*.json` |

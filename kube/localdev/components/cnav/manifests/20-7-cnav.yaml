@@ -191,7 +191,8 @@ data:
   #   static: fixed values instead. extras: str.format templates over the entry's keys.
   #   tool: <component> hides the row when the component isn't installed.
   # Any other store entry with a `password` key is listed too (secret-store/<entry>), so components
-  # that bring their own logins (e.g. usage-db) show up without an edit here.
+  # that bring their own logins (e.g. usage-db) show up without an edit here; so are API keys
+  # (entries api-<name> with an api-key* key, components/api-auth).
   credentials.yaml: |
     - name: Local admin
       entry: localdev-admin
