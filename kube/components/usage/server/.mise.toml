@@ -4,6 +4,7 @@
 #                    default localdev's postgresql://app:localdev@localhost:5432/app; skipped if unreachable)
 #   mise run dev     run locally on :8080 against localdev's Postgres (database `usage`, created in-cluster)
 #   mise run image   build the image (IMAGE=usage-server:dev); in localdev: `mise run build usage`
+#   mise run db-init re-run the database init Job in localdev (after a password change; idempotent)
 
 [tools]
 uv = '0.12.24'
@@ -26,3 +27,14 @@ run = "uv run --no-project --python 3.13 --with-requirements requirements.txt py
 description = "Build the server image"
 dir = "{{config_root}}"
 run = "./build.sh"
+
+[tasks.db-init]
+description = "Re-run the database init Job in localdev (manifests/50-2-1-usage-db-init.yaml)"
+dir = "{{config_root}}"
+run = """
+export KUBECONFIG="${KUBECONFIG:-{{config_root}}/../../../localdev/.kubeconfig}"
+kubectl -n usage delete job usage-db-init --ignore-not-found
+kubectl apply -f manifests/50-2-1-usage-db-init.yaml
+kubectl -n usage wait --for=condition=complete job/usage-db-init --timeout=180s
+kubectl -n usage logs job/usage-db-init --tail=3
+"""

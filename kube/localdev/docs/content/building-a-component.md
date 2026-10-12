@@ -281,6 +281,23 @@ idempotently, as the Keycloak component does (`components/keycloak/manifests/30-
 
 pgweb gets a bookmark for every database on the server automatically, within 30 seconds.
 
+### A database init Job and a connection Secret
+
+For a service that should run unchanged in other environments, keep provisioning out of the
+Deployment. The usage server (`kube/components/usage/server/manifests/`) is the reference:
+
+- **The Deployment reads one Secret**, `<name>-db-app`, with the keys of CloudNativePG's application
+  secret: `host`, `port`, `dbname`, `username`, `password`, `uri`. It retries until the database
+  answers. It holds no admin login and doesn't know who provisioned the database.
+- **In localdev, ExternalSecrets build that Secret** from your `secrets.defaults.toml` entry, adding
+  host, port and database name in a template. A second ExternalSecret, read only by the Job, carries
+  the Postgres admin login (store entry `postgres-app`).
+- **A Job in its own manifest file** creates the role and database idempotently. k3s runs it when the
+  file is first applied, and replaces and re-runs it when its spec changes. It doesn't recreate a
+  deleted Job, so give your component a task that deletes and re-applies it.
+- **Elsewhere, that file is swapped**, for example for a CloudNativePG Cluster named `<name>-db`,
+  whose generated secret is `<name>-db-app`. The Deployment doesn't change.
+
 !!! note "Planned: `deploy.sh`"
     A component's `deploy.sh` will run after the component is installed (by `cluster:create` and
     `cluster:profile`), for setup that manifests express badly: schemas and migrations, a Keycloak

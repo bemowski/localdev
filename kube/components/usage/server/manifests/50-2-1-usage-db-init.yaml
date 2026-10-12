@@ -1,0 +1,84 @@
+# usage database provisioning, localdev flavour: a Job on the shared Postgres (postgres/postgres).
+#
+# Contract (what the server relies on, nothing more): Secret usage-db-app in namespace usage, with
+# host, port, dbname, username, password, uri (the keys of CloudNativePG's <cluster>-app secret),
+# pointing at a database that login owns. The server creates its own tables (migrations at startup).
+# Here usage-db-app comes from the secret store (50-2-0-usage-secrets.yaml) and this Job makes the
+# login and database real. An environment with CloudNativePG replaces this file (e.g. a Cluster
+# named usage-db, whose generated secret is exactly usage-db-app); the Deployment doesn't change.
+#
+# Idempotent: creates roles/database only if missing, (re)sets passwords, grants read-only access.
+# It runs when k3s first applies this file, and again whenever the Job's spec here changes (k3s
+# replaces the Job: its pod template is immutable). k3s doesn't recreate it once deleted (by hand or
+# by the TTL), so to run it again (e.g. after a password change in the secret store):
+#   mise run server:db-init      (kube/components/usage)
+# The server retries its connection meanwhile, so the order Job/Deployment doesn't matter.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: usage
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: usage-db-init
+  namespace: usage
+  labels: {app: usage-db-init}
+spec:
+  backoffLimit: 20                  # Postgres may come up after us on a fresh cluster
+  ttlSecondsAfterFinished: 3600     # logs readable for an hour, then cleaned up
+  template:
+    metadata:
+      labels: {app: usage-db-init}
+    spec:
+      restartPolicy: OnFailure
+      enableServiceLinks: false
+      containers:
+        - name: init
+          image: postgres:18.6
+          env:
+            # admin login: the only consumer of usage-db-admin
+            - name: PGHOST
+              valueFrom: {secretKeyRef: {name: usage-db-admin, key: host}}
+            - name: PGPORT
+              valueFrom: {secretKeyRef: {name: usage-db-admin, key: port}}
+            - name: PGDATABASE
+              valueFrom: {secretKeyRef: {name: usage-db-admin, key: dbname}}
+            - name: PGUSER
+              valueFrom: {secretKeyRef: {name: usage-db-admin, key: username}}
+            - name: PGPASSWORD
+              valueFrom: {secretKeyRef: {name: usage-db-admin, key: password}}
+            # what to create: the server's login + database, Grafana's read-only login
+            - name: DB_NAME
+              valueFrom: {secretKeyRef: {name: usage-db-app, key: dbname}}
+            - name: DB_USER
+              valueFrom: {secretKeyRef: {name: usage-db-app, key: username}}
+            - name: DB_PASSWORD
+              valueFrom: {secretKeyRef: {name: usage-db-app, key: password}}
+            - name: RO_USER
+              valueFrom: {secretKeyRef: {name: usage-db-ro, key: username}}
+            - name: RO_PASSWORD
+              valueFrom: {secretKeyRef: {name: usage-db-ro, key: password}}
+          command:
+            - sh
+            - -c
+            - |
+              set -e
+              until pg_isready -q; do echo "waiting for postgres"; sleep 2; done
+              psql -v ON_ERROR_STOP=1 -v db="$DB_NAME" -v user="$DB_USER" -v pw="$DB_PASSWORD" -v ro="$RO_USER" -v ro_pw="$RO_PASSWORD" <<'SQL'
+              SELECT format('CREATE ROLE %I LOGIN', :'user') WHERE NOT EXISTS (SELECT FROM pg_roles WHERE rolname = :'user')\gexec
+              ALTER ROLE :"user" PASSWORD :'pw';
+              SELECT format('CREATE ROLE %I LOGIN', :'ro') WHERE NOT EXISTS (SELECT FROM pg_roles WHERE rolname = :'ro')\gexec
+              ALTER ROLE :"ro" PASSWORD :'ro_pw';
+              SELECT format('CREATE DATABASE %I OWNER %I', :'db', :'user') WHERE NOT EXISTS (SELECT FROM pg_database WHERE datname = :'db')\gexec
+              GRANT CONNECT ON DATABASE :"db" TO :"ro";
+              \connect :"db"
+              -- read-only role: everything in public, now and in future tables the server creates
+              GRANT USAGE ON SCHEMA public TO :"ro";
+              GRANT SELECT ON ALL TABLES IN SCHEMA public TO :"ro";
+              ALTER DEFAULT PRIVILEGES FOR ROLE :"user" IN SCHEMA public GRANT SELECT ON TABLES TO :"ro";
+              SQL
+              echo "usage roles + database ready"
+          resources:
+            requests: {cpu: 10m, memory: 32Mi}
+            limits: {memory: 128Mi}
