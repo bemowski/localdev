@@ -1,12 +1,12 @@
 """cnav — cluster navigator.
 
 Serves the static page, the config files (cards.yaml, status.yaml),
-/api/status, which evaluates status.yaml against the Kubernetes API using the
-pod's service account, /api/ports, the host ports k3d.yaml exposes and what
-answers them in the cluster, /api/events, cluster events from Loki (72h, shipped
+/cnav/api/status, which evaluates status.yaml against the Kubernetes API using the
+pod's service account, /cnav/api/ports, the host ports k3d.yaml exposes and what
+answers them in the cluster, /cnav/api/events, cluster events from Loki (72h, shipped
 by Alloy) or, while Loki doesn't answer, from the Kubernetes API (last hour), and
-/api/credentials, logins for things not behind SSO (credentials.yaml + the secret store;
-values only from /api/credentials/<id>, when the page reveals one).
+/cnav/api/credentials, logins for things not behind SSO (credentials.yaml + the secret store;
+values only from /cnav/api/credentials/<id>, when the page reveals one).
 Stdlib only, plus PyYAML.
 """
 import base64
@@ -766,28 +766,28 @@ class Handler(SimpleHTTPRequestHandler):
         path = urllib.parse.urlparse(self.path).path
         if path == "/healthz":
             return self.send_json(200, {"ok": True})
-        if path == "/api/status":
+        if path == "/cnav/api/status":
             try:
                 return self.send_json(200, status())
             except Exception as e:
-                log.exception("/api/status failed")
+                log.exception("/cnav/api/status failed")
                 return self.send_json(503, {"error": str(e)})
-        if path == "/api/ports":
+        if path == "/cnav/api/ports":
             try:
                 return self.send_json(200, ports())
             except Exception as e:
-                log.exception("/api/ports failed")
+                log.exception("/cnav/api/ports failed")
                 return self.send_json(503, {"error": str(e)})
-        if path == "/api/events":
+        if path == "/cnav/api/events":
             try:
                 query = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
                 return self.send_json(200, events(include_routine=query.get("all", ["0"])[0] == "1"))
             except Exception as e:
-                log.exception("/api/events failed")
+                log.exception("/cnav/api/events failed")
                 return self.send_json(503, {"error": str(e)})
-        if path == "/api/credentials" or path.startswith("/api/credentials/"):
+        if path == "/cnav/api/credentials" or path.startswith("/cnav/api/credentials/"):
             try:
-                if path == "/api/credentials":
+                if path == "/cnav/api/credentials":
                     return self.send_json(200, credentials())
                 body = credential_values(path.rsplit("/", 1)[1])
                 return self.send_json(200, body) if body else self.send_json(404, {"error": "no such credential"})
@@ -819,7 +819,7 @@ class Handler(SimpleHTTPRequestHandler):
         return super().do_GET()
 
     # access log: errors loud, the page's own 10-second polling and probes only at debug
-    QUIET = ("/healthz", "/api/status", "/api/ports", "/api/events")
+    QUIET = ("/healthz", "/cnav/api/status", "/cnav/api/ports", "/cnav/api/events")
 
     def log_request(self, code="-", size="-"):
         try:

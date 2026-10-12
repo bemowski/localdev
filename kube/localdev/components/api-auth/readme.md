@@ -7,6 +7,9 @@ other services call get their own host, **`http://api.localhost/<name>/`**:
 - each API is either **open** or protected by **its own API keys**;
 - any component adds its API with an Ingress, without touching localdev core.
 
+Every API is also at **`http://localhost/api/<name>/`**, the same API under a path on the main host
+(see [below](#also-at-localhostapiname)).
+
 Traefik does all the routing, as it does for every other route. api-auth is a small stdlib Python
 service (`docker/server.py`) that answers two questions for Traefik:
 
@@ -102,6 +105,20 @@ curl -H 'X-API-Key: localdev-whoami-key'            http://api.localhost/whoami/
   browser route (shorter rules, no host) and loses to every API Ingress (`Host(...) && PathPrefix(...)`
   is always longer).
 
+## Also at `localhost/api/<name>/`
+
+One route (`api-path` in the manifest) makes every API reachable on the main host too: it matches
+`localhost/api/...`, strips `/api`, sets `Host: api.localhost`, and sends the request back into
+Traefik's own Service. From there it's an ordinary `api.localhost` request, with the same key checks
+and the same 404. Components add nothing: `api.localhost/whoami/` and `localhost/api/whoami/` are the
+same API.
+
+- **`/api` is reserved** for this; no app takes it as its own path. (cnav's page uses `/cnav/api/`.)
+- **No SSO**, like `api.localhost`. A keyed API still wants its key, from a browser too.
+- **Priority 30:** above cnav's catch-all `/`, below the `api.localhost` catch-all (40), so
+  `api.localhost/api/...` is a plain 404 and the route never loops.
+- The API sees `Host: api.localhost` and `X-Forwarded-Prefix: /<name>` either way.
+
 ## Names and clients
 
 - `*.localhost` resolves to the loopback address in browsers, curl, and on Linux in general
@@ -115,7 +132,7 @@ curl -H 'X-API-Key: localdev-whoami-key'            http://api.localhost/whoami/
 | file | |
 |---|---|
 | `docker/server.py` | the check (`/check`), the catch-all 404, `/healthz` |
-| `manifests/20-8-api-auth.yaml` | namespace `api`, Deployment, RBAC, Middleware `api/key`, the catch-all IngressRoute |
+| `manifests/20-8-api-auth.yaml` | namespace `api`, Deployment, RBAC, Middleware `api/key`, the catch-all IngressRoute, the `localhost/api/` route |
 | `tests/test_server.py` | `python3 -m unittest discover -s components/api-auth/tests` |
 
 Rebuild after editing the server: `mise run build api-auth`.

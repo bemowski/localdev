@@ -2,6 +2,8 @@
 #   Middleware api/key   forwardAuth API-key check; a component's Ingress adds api-key@kubernetescrd
 #   IngressRoute         api.localhost catch-all -> 404, so the host-less SSO routes (/grafana, ...)
 #                        aren't reachable through api.localhost
+#   IngressRoute api-path  http://localhost/api/<api>/... -> back into Traefik as api.localhost/<api>/...,
+#                        so every API is on both, with the same key checks (no per-component work)
 apiVersion: v1
 kind: Namespace
 metadata:
@@ -109,3 +111,44 @@ spec:
       kind: Rule
       services:
         - {name: api-auth, port: http}
+---
+# localhost/api/<api>/... is the API host under a path: strip /api, set Host: api.localhost, and send
+# the request back into Traefik (its own Service), where the api.localhost routes (keys, catch-all)
+# apply as if it had been called that way. Priority 30: above cnav's catch-all `/` (whose own page
+# uses /cnav/api/, not /api/), below the api.localhost catch-all (40), so api.localhost/api/... is a
+# plain 404 and never loops. Not behind SSO, like api.localhost. /api is reserved for this.
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  name: path-strip
+  namespace: api
+spec:
+  stripPrefix:
+    prefixes: [/api]
+---
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  name: path-host
+  namespace: api
+spec:
+  headers:
+    customRequestHeaders:
+      Host: api.localhost
+---
+apiVersion: traefik.io/v1alpha1
+kind: IngressRoute
+metadata:
+  name: api-path
+  namespace: api
+spec:
+  entryPoints: [web]
+  routes:
+    - match: PathPrefix(`/api/`)
+      priority: 30
+      kind: Rule
+      middlewares:
+        - {name: path-strip}
+        - {name: path-host}
+      services:
+        - {name: traefik, namespace: kube-system, port: web}

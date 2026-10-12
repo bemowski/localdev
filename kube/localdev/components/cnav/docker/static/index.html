@@ -537,7 +537,7 @@
 
   async function refreshPorts() {
     try {
-      const r = checkAuth(await fetch('api/ports', { cache: 'no-store' }));
+      const r = checkAuth(await fetch('cnav/api/ports', { cache: 'no-store' }));
       const data = await r.json();
       if (!r.ok) throw new Error(data.error || `HTTP ${r.status}`);
       renderPorts(data);
@@ -579,7 +579,7 @@
   const credValues = new Map();
   async function credentialValues(id) {
     if (!credValues.has(id)) {
-      const r = checkAuth(await fetch(`api/credentials/${encodeURIComponent(id)}`, { cache: 'no-store' }));
+      const r = checkAuth(await fetch(`cnav/api/credentials/${encodeURIComponent(id)}`, { cache: 'no-store' }));
       const data = await r.json();
       if (!r.ok) throw new Error(data.error || `HTTP ${r.status}`);
       credValues.set(id, data.values);
@@ -678,7 +678,7 @@
   async function refreshCredentials() {
     credValues.clear();   // re-read values on the next reveal (a secrets:sync may have changed them)
     try {
-      const r = checkAuth(await fetch('api/credentials', { cache: 'no-store' }));
+      const r = checkAuth(await fetch('cnav/api/credentials', { cache: 'no-store' }));
       const data = await r.json();
       if (!r.ok) throw new Error(data.error || `HTTP ${r.status}`);
       renderCredentials(data);
@@ -773,7 +773,7 @@
     const btn = document.getElementById('events-refresh');
     btn.classList.add('spinning');
     try {
-      const r = checkAuth(await fetch(`api/events${eventsAll.checked ? '?all=1' : ''}`, { cache: 'no-store' }));
+      const r = checkAuth(await fetch(`cnav/api/events${eventsAll.checked ? '?all=1' : ''}`, { cache: 'no-store' }));
       const data = await r.json();
       if (!r.ok) throw new Error(data.error || `HTTP ${r.status}`);
       renderEvents(data);
@@ -807,7 +807,7 @@
     refreshPorts();   // same cycle; each renders on its own when done
     refreshEvents();
     try {
-      const r = checkAuth(await fetch('api/status', { cache: 'no-store' }));
+      const r = checkAuth(await fetch('cnav/api/status', { cache: 'no-store' }));
       const data = await r.json();
       if (!r.ok) throw new Error(data.error || `HTTP ${r.status}`);
       renderStatus(data);

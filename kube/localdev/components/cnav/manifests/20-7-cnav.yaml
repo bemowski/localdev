@@ -234,7 +234,7 @@ metadata:
   name: cnav
   namespace: cnav
 ---
-# read-only: just what /api/status, /api/ports and /api/events look at
+# read-only: just what /cnav/api/status, /cnav/api/ports and /cnav/api/events look at
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
@@ -258,13 +258,13 @@ rules:
   - apiGroups: [""]                   # node allocatable memory (header tooltip)
     resources: [nodes]
     verbs: [get, list]
-  - apiGroups: [""]                   # /api/ports: which Service answers a host port
+  - apiGroups: [""]                   # /cnav/api/ports: which Service answers a host port
     resources: [services]
     verbs: [list]
   - apiGroups: ["discovery.k8s.io"]   # ... and its ready endpoints
     resources: [endpointslices]
     verbs: [list]
-  - apiGroups: [""]                   # /api/events fallback while Loki isn't answering
+  - apiGroups: [""]                   # /cnav/api/events fallback while Loki isn't answering
     resources: [events]
     verbs: [list]
 ---
@@ -281,7 +281,7 @@ subjects:
     name: cnav
     namespace: cnav
 ---
-# /api/credentials: the secret store's own Secrets (namespace secret-store), nothing else. Anyone
+# /cnav/api/credentials: the secret store's own Secrets (namespace secret-store), nothing else. Anyone
 # signed in through SSO can read them on the page: intended for a local cluster, SSO is the gate.
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
@@ -341,7 +341,7 @@ spec:
               mountPath: /etc/cnav   # whole dir (not subPath) so ConfigMap edits propagate
             - name: profile
               mountPath: /etc/localdev-profile
-            - name: k3d-config     # host port mappings, for /api/ports
+            - name: k3d-config     # host port mappings, for /cnav/api/ports
               mountPath: /etc/localdev/k3d.yaml
               readOnly: true
       volumes:

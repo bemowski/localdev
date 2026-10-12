@@ -42,6 +42,8 @@ info:
 servers:
   - url: http://api.localhost/usage
     description: localdev cluster, from the desktop
+  - url: http://localhost/api/usage
+    description: localdev cluster, from the desktop (the API host under /api)
   - url: http://usage.usage.svc
     description: localdev cluster, from inside the cluster
 

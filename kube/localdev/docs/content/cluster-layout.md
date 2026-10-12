@@ -46,6 +46,10 @@ plus the shared `api-key` Middleware for a keyed API. Clients send `Authorizatio
 `X-API-Key: <key>`; the keys are the secret store entry `api-<name>`. Paths no API claims answer a
 JSON 404, so the browser routes above aren't reachable through `api.localhost`.
 
+Every API is also at `http://localhost/api/<name>/`: one central route strips `/api` and hands the
+request back to Traefik as `api.localhost`, so it's the same API with the same keys, and components
+add nothing. `/api` is reserved for this.
+
 The check is a small service, api-auth (`components/api-auth/`, always on). Traefik still does the
 routing, and asks api-auth about keys the way it asks oauth2-proxy about sign-ins. Its readme
 (`components/api-auth/readme.md`) explains what it does and why; to add an API, see

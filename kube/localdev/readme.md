@@ -21,7 +21,7 @@ Ephemeral local Kubernetes (k3d) with path-based routing on `http://localhost/<a
 | `/registry` | Registry UI (joxit/docker-registry-ui), read-only, for browsing images in the k3d registry (`localhost:5005`) |
 | *(no route)* | Loki holds every pod's logs, shipped by Alloy. Query them in Grafana → Explore → Loki, e.g. `{namespace="demo", app="whoami"}`. |
 | `/oauth2/*` | oauth2-proxy sign-in and callback (`/oauth2/sign_out` to log out) |
-| `http://api.localhost/<name>/` | The API host, for APIs that tools call: no SSO, each API open or keyed (`Authorization: Bearer <key>`). Example: `/whoami/` with key `localdev-whoami-key`; `usage` is open. See [`components/api-auth/readme.md`](components/api-auth/readme.md) |
+| `http://api.localhost/<name>/`, `/api/<name>/` | The API host (also under `/api` on localhost), for APIs that tools call: no SSO, each API open or keyed (`Authorization: Bearer <key>`). Example: `/whoami/` with key `localdev-whoami-key`; `usage` is open. See [`components/api-auth/readme.md`](components/api-auth/readme.md) |
 
 ## Prerequisites
 

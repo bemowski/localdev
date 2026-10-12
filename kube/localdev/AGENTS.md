@@ -52,7 +52,7 @@ component. **Do not edit localdev's core to make one app work.**
 | deploy something | a YAML file in `manifests/` named `<layer number>-<n>-<name>.yaml` |
 | build an image | `build.sh` (any build tool; push `$IMAGE`) or a `docker/` folder with a Dockerfile |
 | a URL on `http://localhost/<name>/` | an Ingress with the `sso` Middleware (copy the guide's example) |
-| an API on `http://api.localhost/<name>/` (no SSO) | an Ingress with `host: api.localhost`; for API keys add the `api-key` Middleware and an `api-<name>` entry in your `secrets.defaults.toml` ([guide](docs/content/building-a-component.md#an-api-on-apilocalhost)) |
+| an API on `http://api.localhost/<name>/`, also `http://localhost/api/<name>/` (no SSO) | an Ingress with `host: api.localhost`; for API keys add the `api-key` Middleware and an `api-<name>` entry in your `secrets.defaults.toml` ([guide](docs/content/building-a-component.md#an-api-on-apilocalhost)) |
 | deploy after Postgres/NATS, in the right layer | `requires = [...]` and `layer = "..."` in `local.toml` |
 | a row in cnav's status column | label workloads `localdev/component: <name>` |
 | secrets | an ExternalSecret against ClusterSecretStore `localdev`, dev values in your `secrets.defaults.toml` |

@@ -203,6 +203,7 @@ component named by a `tool:` there isn't shown twice.)
 For an API that tools or other services call, add an Ingress on the API host
 `http://api.localhost/<name>/` (no SSO; see [Routing and sign-in](cluster-layout.md#routing-and-sign-in)).
 Open API: just the strip. Keyed API: `api-key@kubernetescrd` first, since it reads the path before the strip.
+It's then also at `http://localhost/api/<name>/`, with nothing more to do.
 
 ```yaml
 apiVersion: traefik.io/v1alpha1

@@ -39,7 +39,7 @@ mise run api:test     # lint + check
 | `GET` | `/healthz` | `{status: ok \| unavailable}` |
 | `GET` | `/openapi.yaml` | the spec |
 
-Base URL: `http://api.localhost/usage` (desktop) or `http://usage.usage.svc` (in the cluster).
+Base URL: `http://api.localhost/usage` or `http://localhost/api/usage` (desktop) or `http://usage.usage.svc` (in the cluster).
 Clients read it from `USAGE_URL`.
 
 - **Write-only.** Reporting reads Postgres directly.
@@ -78,7 +78,7 @@ can't drift from the spec. Each batch is written in one transaction:
 | | |
 |---|---|
 | deploy | only while working on it, via your gitignored `kube/localdev/local.toml` (below), then `mise run cluster:profile usage`. `mise run build usage` rebuilds |
-| URLs | `http://api.localhost/usage` (localdev's API host, prefix stripped; open, no API key yet), `http://usage.usage.svc` |
+| URLs | `http://api.localhost/usage`, also `http://localhost/api/usage` (localdev's API host, prefix stripped; open, no API key yet), `http://usage.usage.svc` |
 | database | `usage` on `postgres/postgres`. The server only reads Secret `usage-db-app` (`host`, `port`, `dbname`, `username`, `password`, `uri`: the keys of CloudNativePG's `<cluster>-app` secret) and runs `usage_server/migrations/*.sql` at startup. Provisioning is a separate Job, `usage-db-init` (`manifests/50-2-1-usage-db-init.yaml`): as the Postgres admin (Secret `usage-db-admin`, which only the Job reads) it creates roles `usage` (owner) and `usage_ro` (read-only, Grafana) and the database, from the secret store (`server/secrets.defaults.toml`). Idempotent; `mise run server:db-init` re-runs it. With CloudNativePG, that file is replaced (e.g. a Cluster `usage-db`, whose secret is `usage-db-app`) and the Deployment stays as is |
 | Grafana | datasource **Usage** (uid `usage-pg`, read-only), provisioned through an ExternalSecret in `monitoring` |
 | metrics | `usage_events_total{type,result}`, `usage_batches_total{status}` on port `metrics` (9090) |
