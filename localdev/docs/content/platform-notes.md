@@ -1,7 +1,7 @@
 # Platform notes
 
-localdev was built on Linux. It also runs on **macOS with Rancher Desktop** and on **Windows in
-WSL2 with Docker Engine inside the distro**; [Getting started](getting-started.md) has the setup
+localdev was built on Linux. It also runs on **macOS with Docker Desktop or Rancher Desktop** and on
+**Windows in WSL2 with Docker Engine inside the distro**; [Getting started](getting-started.md) has the setup
 for each. This page collects what differs between them, and what to check when something doesn't work.
 
 Items marked **(to confirm)** are expected to work but haven't been tried on that platform yet.
@@ -17,29 +17,62 @@ Items marked **(to confirm)** are expected to work but haven't been tried on tha
 - **`secrets.store.toml.asc`** is encrypted with a passphrase from your own `~/.ssh/id_ed25519`, so
   only you can decrypt it. A new developer creates their own `secrets.store.toml` (see [Secrets](secrets.md)).
 
-## macOS (Rancher Desktop)
+## macOS
+
+Docker Desktop and Rancher Desktop both run Docker in a Linux VM. Most of what follows applies to
+either; the differences are in their own sections below.
 
 - **CPU architecture.** Apple Silicon is arm64. Every image localdev deploys is published for both
   amd64 and arm64, and `mise run build` builds for the machine you're on, which is also what the
   cluster runs. When you write your own component, use multi-arch base images and **don't pin
   `--platform=linux/amd64`** in Dockerfiles: an amd64 image fails on an arm64 cluster with
   `exec format error`.
-- **Clone under `~`.** Rancher Desktop shares only your home folder with its VM. The cluster mounts
-  the repo, its parent folder (the workspace) and `runtime.data/` from the host by path, so a clone
-  elsewhere gives empty mounts and pods that can't find their files.
-- **File ownership in `runtime.data/`** (to confirm). Postgres, NATS, Prometheus, Loki, Tempo and Grafana
-  `chown` their data folders. This needs the **virtiofs** mount type (Preferences → Virtual Machine → Volumes). If
-  Postgres fails with `data directory ... has wrong ownership`, check that setting, then
-  `mise run cluster:destroy`, `mise run cluster:clean` and `mise run cluster:create`.
-- **Rancher Desktop's Kubernetes must be off.** Its Traefik takes port 80, and it uses memory for a
-  second cluster.
-- **`kubectl` version.** Rancher Desktop puts its own `kubectl` and `helm` in `~/.rd/bin`. Activate
-  mise after that in `~/.zshrc`, so `which kubectl` points into mise's install folder.
+- **Clone under `~`.** Both share your home folder with their VM (Rancher Desktop shares nothing
+  else). The cluster mounts the repo, its parent folder (the workspace) and `runtime.data/` from
+  the host by path, so a clone outside the shared folders gives empty mounts and pods that can't
+  find their files.
+- **File ownership in `runtime.data/`** (to confirm). Postgres, NATS, Prometheus, Loki, Tempo and
+  Grafana `chown` their data folders. This needs the **virtiofs** file sharing. If Postgres fails
+  with `data directory ... has wrong ownership`, check that setting, then `mise run cluster:destroy`,
+  `mise run cluster:clean` and `mise run cluster:create`.
+- **The engine's own Kubernetes must be off.** It uses memory for a second cluster, and Rancher
+  Desktop's also brings a Traefik that takes port 80.
+- **`kubectl` version.** Both install their own `kubectl`. Activate mise last in `~/.zshrc`, so
+  `which kubectl` points into mise's install folder.
+- **Only one engine at a time.** With both installed, the `docker` CLI talks to whichever its
+  current context names. Quit the one you don't use, and check with `docker context ls`
+  (`desktop-linux` is Docker Desktop, `rancher-desktop` is Rancher Desktop); switch with
+  `docker context use <name>`. A cluster created on one engine isn't visible from the other.
 - **inotify limits** live in the VM's kernel. If pods log `too many open files`, check them with
   `docker run --rm alpine sysctl fs.inotify` (to confirm). Values of 1024 instances or more are fine.
 - **bash 3.2.** The mise tasks run with macOS's `/bin/bash`, which is old. They avoid bash 4
   features and GNU-only flags. Keep it that way when adding tasks: no `declare -A`, `mapfile`,
   `${x,,}`, `xargs -d`, `sed -i` without a suffix, `readlink -f`, `date -d`, or `grep -P`.
+
+### Docker Desktop
+
+- **File sharing:** Settings → General → *Virtual Machine Options*: **VirtioFS**, with the Apple
+  Virtualization framework or Docker VMM. Older installs may still be on gRPC FUSE or osxfs, which
+  are slower and can break `chown`.
+- **Shared folders:** `/Users`, `/Volumes`, `/private`, `/tmp` and `/var/folders` by default
+  (Settings → Resources → File sharing). If you've trimmed that list, keep your clone's folder in it.
+- **Memory:** Settings → Resources → Advanced. Docker Desktop's default is often below 6 GB; pods
+  getting `OOMKilled` or evicted mean it needs more.
+- **`kubectl`:** Docker Desktop links its own into `/usr/local/bin` (or `~/.docker/bin`, depending
+  on Settings → Advanced). mise must still win in `PATH`.
+- **Licence:** Docker Desktop needs a paid subscription for commercial use in companies with more
+  than 250 employees or $10M in revenue. Rancher Desktop is free.
+- `docker info` shows `Operating System: Docker Desktop` and `Name: docker-desktop`.
+
+### Rancher Desktop
+
+- **Container engine:** `dockerd (moby)`, not containerd. localdev needs the `docker` CLI and API.
+- **File sharing:** Preferences → Virtual Machine → *Emulation* **VZ**, and *Volumes* **virtiofs**.
+- **Shared folders:** only your home folder.
+- **Kubernetes off:** its Traefik takes port 80.
+- **`kubectl`:** Rancher Desktop puts its own `kubectl` and `helm` in `~/.rd/bin`, and adds that to
+  `~/.zshrc`. Activate mise after those lines.
+- `docker info` shows `Operating System: Rancher Desktop`.
 
 ## Windows (WSL2)
 

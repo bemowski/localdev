@@ -8,7 +8,7 @@ publishes them as ConfigMap kube-system/localdev-host (read by e.g. the usage cl
   cluster_role      [cluster] role in local.toml: dev (default) | test | stage | prod | perftest
   platform          k3d
   os                linux | macos | windows (WSL counts as windows)
-  os_variant        wsl2 | <distro id from /etc/os-release> | rancher-desktop (macOS)
+  os_variant        wsl2 | <distro id from /etc/os-release> | docker-desktop | rancher-desktop (macOS)
   os_version        distro VERSION_ID; on WSL "<distro NAME> <VERSION_ID>"; macOS product version
   platform_version  k3d version (v5.9.0)
 """
@@ -60,7 +60,8 @@ def facts():
     system = platform.system()
     if system == "Darwin":
         engine = run("docker", "info", "--format", "{{.Name}}")
-        os_name, variant, version = "macos", ("rancher-desktop" if "rancher" in engine else ""), platform.mac_ver()[0]
+        variant = "rancher-desktop" if "rancher" in engine else "docker-desktop" if "docker-desktop" in engine else ""
+        os_name, version = "macos", platform.mac_ver()[0]
     elif "microsoft" in Path("/proc/version").read_text(errors="ignore").lower():
         rel = os_release()
         os_name, variant = "windows", "wsl2"

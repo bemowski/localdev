@@ -356,8 +356,8 @@ components:
     OsVariant:
       type: string
       maxLength: 64
-      description: '*localdev*: refinement of `os`, such as `wsl2`, a Linux distribution id, or the macOS Docker runtime (`rancher-desktop`).'
-      examples: [wsl2, ubuntu, fedora, rancher-desktop]
+      description: '*localdev*: refinement of `os`, such as `wsl2`, a Linux distribution id, or the macOS Docker runtime (`docker-desktop`, `rancher-desktop`).'
+      examples: [wsl2, ubuntu, fedora, docker-desktop, rancher-desktop]
 
     OsVersion:
       type: string

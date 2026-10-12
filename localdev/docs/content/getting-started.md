@@ -30,6 +30,33 @@ Set up your platform:
     3. **mise:** `curl https://mise.run | sh`, then add `eval "$(~/.local/bin/mise activate bash)"`
         to `~/.bashrc` (or the `zsh` equivalent).
 
+=== "macOS (Docker Desktop)"
+
+    1. **[Docker Desktop](https://www.docker.com/products/docker-desktop/)**. In its Settings:
+        - **General:** under *Virtual Machine Options*, pick the **Apple Virtualization framework**
+          (or **Docker VMM** on Apple Silicon) and **VirtioFS** for file sharing. These are the
+          defaults on current versions; VirtioFS is faster, and handles file ownership for
+          `runtime.data`.
+        - **Resources → Advanced:** at least **6 GB** of memory (8 GB is more comfortable) and 4 CPUs.
+        - **Kubernetes:** leave it **off** (the default). localdev runs its own cluster (k3d), and a
+          second cluster only costs memory.
+    2. **Keep your clone under your home folder** (e.g. `~/src/mono`). Docker Desktop shares `/Users`
+        with its VM by default (Settings → Resources → File sharing), and the cluster mounts the
+        repo and its parent folder from there.
+    3. **Tools:** `brew install mise gnupg` (curl and git ship with macOS; macOS 13 or newer is needed
+        for `realpath`).
+    4. **Shell:** macOS uses zsh. Add `eval "$(mise activate zsh)"` to the end of `~/.zshrc`.
+        Docker Desktop installs its own `kubectl` (in `/usr/local/bin` or `~/.docker/bin`), and
+        mise's pinned version must come first in `PATH`. Check with `which kubectl`.
+    5. **Check:** `docker info` shows `Operating System: Docker Desktop`, and
+        `docker run --rm hello-world` works.
+
+    Apple Silicon needs nothing extra: every image localdev uses is published for arm64, and
+    `mise run build` builds your images for the same architecture the cluster runs.
+
+    Docker Desktop needs a paid subscription for commercial use in larger companies (more than 250
+    employees or $10M in revenue). If that's you and you don't have one, use Rancher Desktop instead.
+
 === "macOS (Rancher Desktop)"
 
     1. **[Rancher Desktop](https://rancherdesktop.io/)**. In its Preferences:

@@ -25,9 +25,9 @@ Ephemeral local Kubernetes (k3d) with path-based routing on `http://localhost/<a
 
 ## Prerequisites
 
-Supported platforms: **Linux**, **macOS with Rancher Desktop** (Intel or Apple Silicon), and **Windows in WSL2 with Docker Engine installed inside the distro** (not Docker Desktop). The per-platform setup is in [Getting started](docs/content/getting-started.md), and the quirks are in [Platform notes](docs/content/platform-notes.md).
+Supported platforms: **Linux**, **macOS with Docker Desktop or Rancher Desktop** (Intel or Apple Silicon), and **Windows in WSL2 with Docker Engine installed inside the distro** (not Docker Desktop). The per-platform setup is in [Getting started](docs/content/getting-started.md), and the quirks are in [Platform notes](docs/content/platform-notes.md).
 
-- **Docker.** On Linux and WSL, your user must be in the `docker` group. On macOS, Rancher Desktop with the `dockerd (moby)` engine and its own Kubernetes turned off.
+- **Docker.** On Linux and WSL, your user must be in the `docker` group. On macOS, Docker Desktop or Rancher Desktop (with the `dockerd (moby)` engine), with VirtioFS file sharing and its own Kubernetes turned off.
 - **Free host ports:** 80 (ingress), 5005 (local registry `localdev-registry`), and 5432 / 4222 on 127.0.0.1 (Postgres / NATS). Check with `ss -ltnp` (Linux, WSL) or `lsof -nP -iTCP -sTCP:LISTEN` (macOS).
 - **About 6 GB of memory for Docker.**
 - **Linux and WSL: raise the inotify limits.** Every k3d node shares the host kernel, and following container logs (Alloy → Loki) uses one inotify instance per stream. The default of 128 runs out, and pods then log `failed to create fsnotify watcher: too many open files` instead of their real output. Raise it once:
