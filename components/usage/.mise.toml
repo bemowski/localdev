@@ -4,7 +4,7 @@
 #   mise run api:check    validate examples/ and the spec's inline examples against the schemas
 #   mise run api:docs     render the spec to build/api.html
 #   mise run api:test     lint + check
-#   mise run server:test | server:image | server:dev | server:db-init   (delegate to server/.mise.toml)
+#   mise run server:test | server:image | server:release | server:dev | server:db-init   (delegate to server/.mise.toml)
 #   mise run agent:test | agent:image                   (delegate to cluster-agent/.mise.toml)
 
 [tools]
@@ -45,6 +45,11 @@ run = "mise run test"
 description = "Build the server image (server/build.sh)"
 dir = "{{config_root}}/server"
 run = "mise run image"
+
+[tasks."server:release"]
+description = "Build, push and git-tag the server image for server/VERSION"
+dir = "{{config_root}}/server"
+run = "mise run release"
 
 [tasks."server:db-init"]
 description = "Re-run the database init Job in localdev (after a password change; idempotent)"

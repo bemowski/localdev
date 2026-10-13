@@ -45,7 +45,7 @@ kubectl -n usage logs job/usage-db-init --tail=3
 [tasks.release]
 description = "Build and push the server image for VERSION, then tag git"
 dir = "{{config_root}}"
-run = """
+run = """#!/bin/bash
 set -euo pipefail
 ver="$(tr -d '[:space:]' < VERSION)"
 image="$USAGE_REPO:$ver"
