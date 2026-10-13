@@ -56,7 +56,7 @@ The store's values are merged from these files, later ones winning:
 
 | file | committed? | holds |
 |---|---|---|
-| `secrets.defaults.toml` | yes | the platform entries: their keys, fixed values (`username = "admin"`), and `""` for **required** values |
+| `secrets.defaults.toml` | yes | the platform entries: their keys and dev defaults (`admin` / `admin`, placeholder Google client): enough to run with Google sign-in off |
 | `components/<c>/secrets.defaults.toml` | yes | a component's fixed dev values (Postgres `app` / `localdev`) |
 | **`secrets.store.toml`** | **no** (gitignored) | your real secrets and any overrides |
 
@@ -83,11 +83,15 @@ mise run secrets:sync      # merge the files into the store; ESO and Reloader ta
 mise run secrets:list      # entries and keys (no values), where each comes from, ExternalSecret status
 ```
 
-- `cluster:create` checks that every required value is set before it starts, and syncs after.
+- `secrets.store.toml` is optional: without it you sign in as `admin` / `admin` and the Google button
+  fails until you set a real `[sso]` client. `secrets:check` says so.
+- `cluster:create` checks that every required value (`""` in a defaults file) is set before it
+  starts, and syncs after.
 - Entries removed from the files are removed from the store.
 - To share values with a team without committing them in plain text, encrypt the file
-  (`mise run encrypt secrets.store.toml`) and commit `secrets.store.toml.asc`; it is decrypted
-  automatically when it is newer than your copy.
+  (`mise run encrypt secrets.store.toml`) and commit `secrets.store.toml.asc`. Nothing decrypts it
+  automatically: decrypt it yourself. `secrets:check` only notes when it's there but not decrypted,
+  or newer than your copy.
 - **Coming from `secrets.env`?** `mise run secrets:migrate` writes `secrets.store.toml` from it once
   (it never overwrites or deletes anything). Then encrypt the new file, and delete `secrets.env` and
   `secrets.env.asc` when you're happy.
@@ -170,6 +174,55 @@ kubectl -n external-secrets create secret generic gcp-sm --from-file=key.json=<s
 AWS Secrets Manager and Vault work the same way (provider `aws` with access keys, or `vault` with a
 token); see the ESO provider docs. Making the store's backing a configurable choice (local or Google)
 is the next step on the roadmap.
+
+## Reading GCP Secret Manager as yourself
+
+Next to `localdev`, a second store, `dematicnonprod.localdev`, reads Google Secret Manager (project
+`LOCALDEV_GCP_PROJECT`, set in `.mise.toml`: DematicNonProd/localdev) with your own gcloud login, not a
+service account key. Store names can't contain `/` or capitals, so the display name is an annotation.
+
+**`cluster:create` turns it on by itself** when it can: if you've run
+`gcloud auth application-default login` and can read the project's secrets, the cluster comes up with
+the GCP store and **Google sign-in works**: oauth2-proxy uses the OAuth client stored in GCP
+(`localdev-sso-oauth`). If not (no gcloud, no login, an expired one, no access), it says why and carries
+on with local sign-in only (`admin`). To turn it on later, or after `gcloud auth application-default login`:
+
+```bash
+mise run secrets:gcp-login     # prompts for the gcloud login if you have none; fails loudly
+```
+
+To try the cluster as someone without GCP access, set `LOCALDEV_GCP=off`
+(`LOCALDEV_GCP=off mise run cluster:create`, or in `.mise.local.toml` `[env]`).
+
+How it works: the task copies your Application Default Credentials
+(`~/.config/gcloud/application_default_credentials.json`) into Secret `external-secrets/gcp-adc`, which
+the ESO controller mounts as `GOOGLE_APPLICATION_CREDENTIALS`. A `gcpsm` store with no `auth` block uses
+those. (ESO's `secretRef` auth only takes service account keys.) It then applies
+`components/external-secrets/gcp-store.yaml.tmpl`: the store, plus ExternalSecret
+`auth/oauth2-proxy-google`. oauth2-proxy loads `envFrom` Secret `oauth2-proxy` (localdev store) and then
+the optional `oauth2-proxy-google`, so the GCP client wins when it exists. The cookie secret, the admin
+login and the `[sso-access]` allow-list stay in the localdev store.
+
+Your own components can read from it too:
+
+```yaml
+apiVersion: external-secrets.io/v1
+kind: ExternalSecret
+metadata: {name: myapp-api, namespace: myapp}
+spec:
+  secretStoreRef: {kind: ClusterSecretStore, name: dematicnonprod.localdev}
+  data:
+    - {secretKey: api-key, remoteRef: {key: myapp-api-key}}   # Google secret name (latest version)
+```
+
+That only works for developers with GCP access. Keep a `localdev`-store fallback for the others.
+
+- You read what your IAM grants: `secretmanager.versions.access` on the secrets.
+- The credential is controller-wide: any `gcpsm` store without `auth` in this cluster reads as you.
+  It's a long-lived refresh token, so keep it to your own local cluster.
+- Your ADC needs a quota project (`gcloud auth application-default set-quota-project <project>`).
+- If your org's session policy expires the login, the store turns not-ready: run
+  `gcloud auth application-default login` and `mise run secrets:gcp-login` again.
 
 !!! note "Postgres passwords"
     Postgres uses `postgres-app.password` only when it first initializes its data

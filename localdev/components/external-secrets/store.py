@@ -122,6 +122,9 @@ if __name__ == "__main__":
             for e, k in gaps:
                 print(f"  missing: [{e}] {k}  (set it in {STORE.name})", file=sys.stderr)
             sys.exit(f"store: {len(gaps)} required secret(s) not set - see the docs (Secrets)")
+        if data.get("sso", {}).get("google-client-id", "").startswith("localdev-unset"):
+            print(f"  note: no Google OAuth client set ([sso] in {STORE.name}) - Google sign-in won't work;"
+                  " sign in with the admin form", file=sys.stderr)
     elif cmd == "migrate":
         sys.stdout.write(migrate(sys.argv[2] if len(sys.argv) > 2 else LOCALDEV / "secrets.env"))
     else:

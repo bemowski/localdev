@@ -1,4 +1,12 @@
 
+* Created DematicNonProd/localdev
+  - added Google Auth Platform / OAuth client - localdev-sso, redirect url localhost/oauth2/callback  (maybe should add keycloak)
+  - enabled secrets manager api
+  - added oauth client secret to secrets manager.
+  - TODO: iam service account that can read secrets
+     - service account key (static) for secrets manager.
+
+
 * valid certs
   - dns name
   - certmanager

@@ -36,8 +36,8 @@ Supported platforms: **Linux**, **macOS with Docker Desktop or Rancher Desktop**
   sudo sysctl --system
   ```
 - **mise.** Run `mise install` in this directory to get k3d, kubectl, kn, yq and Python.
-- **git, curl, gpg.** gpg is only needed to decrypt `secrets.store.toml.asc`.
-- **`secrets.store.toml` or `secrets.store.toml.asc`**: your secrets (Google OAuth client, cookie secret, admin password), from the Google OAuth setup below. All secrets are mastered in the secret store and synced by External Secrets: see the docs ([Secrets](docs/content/secrets.md)). Have an old `secrets.env`? `mise run secrets:migrate` converts it.
+- **git, curl.** (gpg only if you encrypt your own `secrets.store.toml` to keep a copy.)
+- **`secrets.store.toml`** (optional): your secrets (Google OAuth client, cookie secret, admin password), from the Google OAuth setup below. Nothing decrypts it for you: the committed `secrets.store.toml.asc` is one developer's encrypted copy. Without a `secrets.store.toml`, localdev runs on the defaults in `secrets.defaults.toml`: sign in as `admin` / `admin`, and Google sign-in doesn't work. All secrets are mastered in the secret store and synced by External Secrets: see the docs ([Secrets](docs/content/secrets.md)). Have an old `secrets.env`? `mise run secrets:migrate` converts it.
 
 ## Usage
 
@@ -74,8 +74,8 @@ See the docs: [Getting started](docs/content/getting-started.md) (profiles), [Cl
 **What the cluster knows about its profile and host.** `cluster:create` and `cluster:profile` publish two ConfigMaps for pods to read: `cnav/localdev-profile` (profile name, enabled components) and `kube-system/localdev-host` (username, `cluster_type` = localdev, `cluster_role`, host `os` / `os_variant` / `os_version`, k3d version, from `hostfacts.py`). The role defaults to `dev`; set it in your `local.toml` with `[cluster]` / `role = "perftest"` (one of dev, test, stage, prod, perftest), then `mise run cluster:profile`.
 
 **Signing in.** Every app goes through oauth2-proxy (each namespace has an `sso` forwardAuth Middleware). Its sign-in page offers two ways in:
-- **Sign in with Google.** Only accounts on the **allow-list** get in, and it applies to every app. The list is `[sso-access]` in `secrets.store.toml`: `emails` for exact addresses and `domains` for whole domains (`"example.com"`, or `".example.com"` for any subdomain). Edit it, then `mise run secrets:sync`. See [Secrets](docs/content/secrets.md#who-can-sign-in). Google accounts must also be test users on the consent screen (below), unless the app is published.
-- **Username and password:** user `admin`, password `[localdev-admin] password` from `secrets.store.toml`. This works offline, since nothing goes to Google. Local sessions have no email, so the allow-list doesn't apply to them.
+- **Sign in with Google.** Works when the cluster could use your gcloud login to read the OAuth client from GCP Secret Manager (`cluster:create` tries; see [Secrets](docs/content/secrets.md#reading-gcp-secret-manager-as-yourself)), or with your own client in `secrets.store.toml`. Only accounts on the **allow-list** get in, and it applies to every app. The list is `[sso-access]` in `secrets.store.toml`: `emails` for exact addresses and `domains` for whole domains (`"example.com"`, or `".example.com"` for any subdomain). Edit it, then `mise run secrets:sync`. See [Secrets](docs/content/secrets.md#who-can-sign-in). Google accounts must also be test users on the consent screen (below), unless the app is published.
+- **Username and password:** user `admin`, password `[localdev-admin] password` (`admin` unless `secrets.store.toml` overrides it). This works offline, since nothing goes to Google. Local sessions have no email, so the allow-list doesn't apply to them.
   - Apps that sign you in from the email header (Grafana) show their own login form for `admin` instead. Grafana's built-in admin is set to the same `admin` and password.
   - To change the password: edit `secrets.store.toml`, run `mise run secrets:sync` (Reloader rolls oauth2-proxy and Grafana), and `mise run encrypt secrets.store.toml` to update the shared copy.
 - To limit a single app to certain Google accounts, add `?allowed_emails=a@x.com` to that app's middleware address. That also shuts `admin` out of that app, because local sessions have no email.
@@ -341,4 +341,4 @@ oauth2-proxy needs a Google OAuth client ID and secret, plus a cookie secret.
    mise run encrypt secrets.store.toml    # -> secrets.store.toml.asc
    git add secrets.store.toml.asc
    ```
-   `mise run cluster:create` decrypts `secrets.store.toml.asc` automatically when `secrets.store.toml` is missing or older than it, and checks every required value (`""` in `secrets.defaults.toml`) is set. Save the file before encrypting: the encrypt task reads the file on disk. The passphrase is `$PASSPHRASE_FILE`, which defaults to `~/.ssh/id_ed25519`.
+   Nothing decrypts it automatically: decrypt it yourself to restore `secrets.store.toml` (`cluster:create` notes it when the `.asc` exists but `secrets.store.toml` is missing or older). `cluster:create` checks every required value is set. Save the file before encrypting: the encrypt task reads the file on disk. The passphrase is `$PASSPHRASE_FILE`, which defaults to `~/.ssh/id_ed25519`.
