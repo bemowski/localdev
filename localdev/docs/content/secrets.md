@@ -175,6 +175,44 @@ AWS Secrets Manager and Vault work the same way (provider `aws` with access keys
 token); see the ESO provider docs. Making the store's backing a configurable choice (local or Google)
 is the next step on the roadmap.
 
+## Reading GCP Secret Manager as yourself
+
+Next to `localdev`, a second store, `dematicnonprod.localdev`, reads Google Secret Manager with your
+own gcloud login: no service account key. (Store names can't contain `/` or capitals, so the display
+name `DematicNonProd/localdev` is an annotation.) It's opt-in, per developer:
+
+```bash
+# once: the project holding the secrets, in the gitignored kube/localdev/.mise.local.toml
+#   [env]
+#   LOCALDEV_GCP_PROJECT = "my-project"
+mise run secrets:gcp-login     # runs `gcloud auth application-default login` if you have no ADC yet
+```
+
+The task copies your Application Default Credentials
+(`~/.config/gcloud/application_default_credentials.json`) into Secret `external-secrets/gcp-adc`, which
+the ESO controller mounts as `GOOGLE_APPLICATION_CREDENTIALS`, and applies the store. A `gcpsm` store
+with no `auth` block uses those credentials. ESO's `secretRef` auth only takes service account keys,
+which is why a user login goes this way. Then read a secret from it:
+
+```yaml
+apiVersion: external-secrets.io/v1
+kind: ExternalSecret
+metadata: {name: myapp-api, namespace: myapp}
+spec:
+  secretStoreRef: {kind: ClusterSecretStore, name: dematicnonprod.localdev}
+  data:
+    - {secretKey: api-key, remoteRef: {key: myapp-api-key}}   # Google secret name (latest version)
+```
+
+- You read what your IAM grants, no more: you need `secretmanager.versions.access` on the secrets.
+- The credential is controller-wide: any `gcpsm` store without `auth` in this cluster reads as you.
+  It's a long-lived refresh token, so keep it to your own local cluster.
+- Your ADC needs a quota project (`gcloud auth application-default set-quota-project <project>`).
+- If your org's session policy expires the login, the store turns not-ready: run
+  `gcloud auth application-default login` and `mise run secrets:gcp-login` again.
+- To remove it: `kubectl delete clustersecretstore dematicnonprod.localdev` and
+  `kubectl -n external-secrets delete secret gcp-adc`.
+
 !!! note "Postgres passwords"
     Postgres uses `postgres-app.password` only when it first initializes its data
     (`runtime.data/postgres`). Changing it later updates the Secret, not the database.

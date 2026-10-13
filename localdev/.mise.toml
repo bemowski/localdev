@@ -16,6 +16,8 @@ yq = '4.54.1'            # cluster:profile (don't rely on the monorepo root's to
 CLUSTER_NAME = "localdev"
 KUBECONFIG = "{{config_root}}/.kubeconfig"   # never touch ~/.kube/config
 LOCALDEV_ROOT = "{{config_root}}"            # expanded in k3d.yaml (absolute host paths)
+LOCALDEV_GCP_PROJECT = "localdev-511501"     # DematicNonProd/localdev
+
 
 [tasks."cluster:create"]
 description = "Create the localdev k3d cluster with a profile (default: last used, else profiles.toml default)"
@@ -205,6 +207,20 @@ python3 components/external-secrets/store.py check && echo "wrote secrets.store.
 echo "next: mise run encrypt secrets.store.toml   # -> secrets.store.toml.asc, commit it"
 echo "      mise run secrets:sync                 # load it into the cluster"
 echo "      then delete secrets.env and secrets.env.asc yourself when you're happy"
+"""
+
+[tasks."secrets:gcp-login"]
+description = "Let ESO read GCP Secret Manager as you: copy your gcloud ADC into the cluster, apply store dematicnonprod.localdev"
+run = """#!/bin/bash
+set -euo pipefail
+[ -n "${LOCALDEV_GCP_PROJECT:-}" ] || { echo "set LOCALDEV_GCP_PROJECT (the GCP project holding the secrets), e.g. in .mise.local.toml [env]" >&2; exit 1; }
+adc="${CLOUDSDK_CONFIG:-$HOME/.config/gcloud}/application_default_credentials.json"
+[ -s "$adc" ] || gcloud auth application-default login
+kubectl create secret generic gcp-adc -n external-secrets --from-file=adc.json="$adc" \
+    --dry-run=client -o yaml | kubectl apply -f - | sed 's/^/  /'
+LOCALDEV_GCP_PROJECT="$LOCALDEV_GCP_PROJECT" envsubst '${LOCALDEV_GCP_PROJECT}' < components/external-secrets/gcp-store.yaml.tmpl \
+    | kubectl apply -f - | sed 's/^/  /'
+echo "  Reloader rolls the ESO controller when gcp-adc changes; check: kubectl get clustersecretstore dematicnonprod.localdev"
 """
 
 [tasks."secrets:list"]

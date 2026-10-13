@@ -1,0 +1,13 @@
+# ClusterSecretStore over GCP Secret Manager, reading as YOU (not a service account key):
+# no auth block, so ESO uses the controller's Application Default Credentials, i.e. Secret
+# external-secrets/gcp-adc. Applied by `mise run secrets:gcp-login` with ${LOCALDEV_GCP_PROJECT}
+# filled in. Store names must be DNS subdomains (no "/" or capitals): the display name is an annotation.
+apiVersion: external-secrets.io/v1
+kind: ClusterSecretStore
+metadata:
+  name: dematicnonprod.localdev
+  annotations: {localdev/store-display: DematicNonProd/localdev}
+spec:
+  provider:
+    gcpsm:
+      projectID: ${LOCALDEV_GCP_PROJECT}
