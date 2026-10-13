@@ -177,22 +177,33 @@ is the next step on the roadmap.
 
 ## Reading GCP Secret Manager as yourself
 
-Next to `localdev`, a second store, `dematicnonprod.localdev`, reads Google Secret Manager with your
-own gcloud login: no service account key. (Store names can't contain `/` or capitals, so the display
-name `DematicNonProd/localdev` is an annotation.) It's opt-in, per developer:
+Next to `localdev`, a second store, `dematicnonprod.localdev`, reads Google Secret Manager (project
+`LOCALDEV_GCP_PROJECT`, set in `.mise.toml`: DematicNonProd/localdev) with your own gcloud login, not a
+service account key. Store names can't contain `/` or capitals, so the display name is an annotation.
+
+**`cluster:create` turns it on by itself** when it can: if you've run
+`gcloud auth application-default login` and can read the project's secrets, the cluster comes up with
+the GCP store and **Google sign-in works**: oauth2-proxy uses the OAuth client stored in GCP
+(`localdev-sso-oauth`). If not (no gcloud, no login, an expired one, no access), it says why and carries
+on with local sign-in only (`admin`). To turn it on later, or after `gcloud auth application-default login`:
 
 ```bash
-# once: the project holding the secrets, in the gitignored kube/localdev/.mise.local.toml
-#   [env]
-#   LOCALDEV_GCP_PROJECT = "my-project"
-mise run secrets:gcp-login     # runs `gcloud auth application-default login` if you have no ADC yet
+mise run secrets:gcp-login     # prompts for the gcloud login if you have none; fails loudly
 ```
 
-The task copies your Application Default Credentials
+To try the cluster as someone without GCP access, set `LOCALDEV_GCP=off`
+(`LOCALDEV_GCP=off mise run cluster:create`, or in `.mise.local.toml` `[env]`).
+
+How it works: the task copies your Application Default Credentials
 (`~/.config/gcloud/application_default_credentials.json`) into Secret `external-secrets/gcp-adc`, which
-the ESO controller mounts as `GOOGLE_APPLICATION_CREDENTIALS`, and applies the store. A `gcpsm` store
-with no `auth` block uses those credentials. ESO's `secretRef` auth only takes service account keys,
-which is why a user login goes this way. Then read a secret from it:
+the ESO controller mounts as `GOOGLE_APPLICATION_CREDENTIALS`. A `gcpsm` store with no `auth` block uses
+those. (ESO's `secretRef` auth only takes service account keys.) It then applies
+`components/external-secrets/gcp-store.yaml.tmpl`: the store, plus ExternalSecret
+`auth/oauth2-proxy-google`. oauth2-proxy loads `envFrom` Secret `oauth2-proxy` (localdev store) and then
+the optional `oauth2-proxy-google`, so the GCP client wins when it exists. The cookie secret, the admin
+login and the `[sso-access]` allow-list stay in the localdev store.
+
+Your own components can read from it too:
 
 ```yaml
 apiVersion: external-secrets.io/v1
@@ -204,14 +215,14 @@ spec:
     - {secretKey: api-key, remoteRef: {key: myapp-api-key}}   # Google secret name (latest version)
 ```
 
-- You read what your IAM grants, no more: you need `secretmanager.versions.access` on the secrets.
+That only works for developers with GCP access. Keep a `localdev`-store fallback for the others.
+
+- You read what your IAM grants: `secretmanager.versions.access` on the secrets.
 - The credential is controller-wide: any `gcpsm` store without `auth` in this cluster reads as you.
   It's a long-lived refresh token, so keep it to your own local cluster.
 - Your ADC needs a quota project (`gcloud auth application-default set-quota-project <project>`).
 - If your org's session policy expires the login, the store turns not-ready: run
   `gcloud auth application-default login` and `mise run secrets:gcp-login` again.
-- To remove it: `kubectl delete clustersecretstore dematicnonprod.localdev` and
-  `kubectl -n external-secrets delete secret gcp-adc`.
 
 !!! note "Postgres passwords"
     Postgres uses `postgres-app.password` only when it first initializes its data

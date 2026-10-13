@@ -1,14 +1,13 @@
 # kube/localdev — ephemeral local kubernetes (k3d)
 #   cluster:  mise run cluster:create [profile] | cluster:profile [profile] | cluster:status | cluster:destroy | cluster:recreate | cluster:secrets | cluster:clean
 #   components/tools: mise run build <component> | pg:psql | kn:forward | keycloak:apply | keycloak:export
-#   secrets:  mise run secrets:sync | secrets:list | secrets:migrate   (secret store for External Secrets)
+#   secrets:  mise run secrets:sync | secrets:list | secrets:migrate | secrets:gcp-login   (secret stores for External Secrets)
 #   mise run grafana:list | grafana:export | grafana:import | grafana:fetch   (see grafana/dashtool.py)
 #   see readme.md
 
 [tools]
 k3d = '5.9.0'
 kubectl = '1.37.1'   # overrides root 1.27
-kn = 'knative-v1.23.0'   # Knative CLI (kn service create/list, kn broker, kn trigger)
 python = '3.12.15'       # profile.py, grafana/dashtool.py, realmtool.py (stdlib only; tomllib needs 3.11+)
 yq = '4.54.1'            # cluster:profile (don't rely on the monorepo root's toolchain)
 
@@ -16,6 +15,8 @@ yq = '4.54.1'            # cluster:profile (don't rely on the monorepo root's to
 CLUSTER_NAME = "localdev"
 KUBECONFIG = "{{config_root}}/.kubeconfig"   # never touch ~/.kube/config
 LOCALDEV_ROOT = "{{config_root}}"            # expanded in k3d.yaml (absolute host paths)
+
+LOCALDEV_GCP = "on" # this can be set to 'off' to test local only sign-in
 LOCALDEV_GCP_PROJECT = "localdev-511501"     # DematicNonProd/localdev
 
 
@@ -54,6 +55,10 @@ mise run cluster:profile:sync
 echo "Waiting for traefik..."
 until kubectl -n kube-system get deploy traefik >/dev/null 2>&1; do sleep 2; done
 kubectl -n kube-system rollout status deploy/traefik --timeout=180s
+
+# GCP Secret Manager as you (gcloud ADC), if that works here: Google sign-in. Otherwise local sign-in
+# only. Never fails the create; LOCALDEV_GCP=off skips it
+mise run secrets:gcp-login --auto || echo "  GCP store setup failed - sign in with the admin form" >&2
 
 for c in $(python3 profile.py buildable); do mise run build "$c"; done   # build.sh or docker/
 
@@ -210,17 +215,58 @@ echo "      then delete secrets.env and secrets.env.asc yourself when you're hap
 """
 
 [tasks."secrets:gcp-login"]
-description = "Let ESO read GCP Secret Manager as you: copy your gcloud ADC into the cluster, apply store dematicnonprod.localdev"
+description = "Read GCP Secret Manager as you (gcloud ADC): store dematicnonprod.localdev + Google sign-in from it"
+usage = 'flag "--auto" help="for cluster:create: never prompt; if GCP is not usable, say so and carry on (local sign-in)"'
 run = """#!/bin/bash
 set -euo pipefail
-[ -n "${LOCALDEV_GCP_PROJECT:-}" ] || { echo "set LOCALDEV_GCP_PROJECT (the GCP project holding the secrets), e.g. in .mise.local.toml [env]" >&2; exit 1; }
+auto="${usage_auto:-false}"
+# auto (cluster:create): GCP is a bonus - explain and succeed; run by hand: fail
+fail() {
+    if [ "$auto" = true ]; then
+        echo "  GCP store off: $1 - sign in with the admin form (no Google). Later: mise run secrets:gcp-login" >&2; exit 0
+    fi
+    echo "secrets:gcp-login: $1" >&2; exit 1
+}
+[ "${LOCALDEV_GCP:-on}" != off ] || fail "LOCALDEV_GCP=off"
+[ -n "${LOCALDEV_GCP_PROJECT:-}" ] || fail "LOCALDEV_GCP_PROJECT not set"
+command -v gcloud >/dev/null || fail "gcloud not installed"
 adc="${CLOUDSDK_CONFIG:-$HOME/.config/gcloud}/application_default_credentials.json"
-[ -s "$adc" ] || gcloud auth application-default login
-kubectl create secret generic gcp-adc -n external-secrets --from-file=adc.json="$adc" \
-    --dry-run=client -o yaml | kubectl apply -f - | sed 's/^/  /'
+if [ ! -s "$adc" ]; then
+    [ "$auto" != true ] || fail "no gcloud application-default login"
+    gcloud auth application-default login
+fi
+# the credential works and can see the OAuth client (metadata only, never the value)
+token=$(gcloud auth application-default print-access-token 2>/dev/null) \
+    || fail "gcloud application-default login expired or invalid (gcloud auth application-default login)"
+quota=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get("quota_project_id", ""))' "$adc")
+code=$(curl -s -o /dev/null -w '%{http_code}' -H @<(printf 'Authorization: Bearer %s\\n' "$token") \
+    ${quota:+-H "x-goog-user-project: $quota"} \
+    "https://secretmanager.googleapis.com/v1/projects/$LOCALDEV_GCP_PROJECT/secrets/localdev-sso-oauth") || code=000
+[ "$code" = 200 ] || fail "can't read secret localdev-sso-oauth in $LOCALDEV_GCP_PROJECT (HTTP $code)"
+
+# a fresh cluster: wait for ESO's CRDs (k3s installs the chart)
+for crd in clustersecretstores externalsecrets; do
+    kubectl wait --for=create "crd/$crd.external-secrets.io" --timeout=300s >/dev/null
+    kubectl wait --for=condition=established "crd/$crd.external-secrets.io" --timeout=60s >/dev/null
+done
+for ns in external-secrets auth; do kubectl get namespace "$ns" >/dev/null 2>&1 || kubectl create namespace "$ns" >/dev/null; done
+out=$(kubectl create secret generic gcp-adc -n external-secrets --from-file=adc.json="$adc" --dry-run=client -o yaml | kubectl apply -f -)
+echo "  $out"
+if grep -qE ' (created|configured)' <<< "$out"; then   # ESO reads the credential at start-up
+    kubectl -n external-secrets wait --for=create deploy/external-secrets --timeout=300s >/dev/null
+    kubectl -n external-secrets rollout restart deploy/external-secrets >/dev/null
+    kubectl -n external-secrets rollout status deploy/external-secrets --timeout=180s >/dev/null
+fi
 LOCALDEV_GCP_PROJECT="$LOCALDEV_GCP_PROJECT" envsubst '${LOCALDEV_GCP_PROJECT}' < components/external-secrets/gcp-store.yaml.tmpl \
     | kubectl apply -f - | sed 's/^/  /'
-echo "  Reloader rolls the ESO controller when gcp-adc changes; check: kubectl get clustersecretstore dematicnonprod.localdev"
+kubectl -n auth wait externalsecret/oauth2-proxy-google --for=condition=Ready --timeout=120s >/dev/null \
+    || fail "store dematicnonprod.localdev isn't syncing: $(kubectl get clustersecretstore dematicnonprod.localdev -o jsonpath='{.status.conditions[0].message}')"
+# oauth2-proxy picks the client up at start-up (Reloader rolls it on later changes, not on creation)
+if kubectl -n auth get deploy oauth2-proxy >/dev/null 2>&1; then
+    kubectl -n auth rollout restart deploy/oauth2-proxy >/dev/null
+    kubectl -n auth rollout status deploy/oauth2-proxy --timeout=180s >/dev/null
+fi
+echo "  GCP store on: Google sign-in uses the OAuth client from $LOCALDEV_GCP_PROJECT"
 """
 
 [tasks."secrets:list"]

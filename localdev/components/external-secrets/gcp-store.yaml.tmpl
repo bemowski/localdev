@@ -11,3 +11,20 @@ spec:
   provider:
     gcpsm:
       projectID: ${LOCALDEV_GCP_PROJECT}
+---
+# Google sign-in from GCP: the OAuth client (a Google "web" client JSON) -> Secret auth/oauth2-proxy-google.
+# oauth2-proxy reads it through an optional envFrom that overrides the localdev store's placeholders
+# (manifests/10-platform/10-2-oauth2-proxy.yaml); without GCP the Secret never exists. The cookie secret,
+# admin login and [sso-access] allow-list stay in the localdev store.
+apiVersion: external-secrets.io/v1
+kind: ExternalSecret
+metadata:
+  name: oauth2-proxy-google
+  namespace: auth
+spec:
+  refreshInterval: 1h
+  secretStoreRef: {kind: ClusterSecretStore, name: dematicnonprod.localdev}
+  target: {name: oauth2-proxy-google}
+  data:
+    - {secretKey: OAUTH2_PROXY_CLIENT_ID, remoteRef: {key: localdev-sso-oauth, property: web.client_id}}
+    - {secretKey: OAUTH2_PROXY_CLIENT_SECRET, remoteRef: {key: localdev-sso-oauth, property: web.client_secret}}

@@ -10,7 +10,8 @@
 #     domains), synced to Secret auth/oauth2-proxy-access by 10-3-sso-secrets.yaml
 #   - local user "admin" (htpasswd), password from the secret store (localdev-admin)
 # Secrets auth/oauth2-proxy, auth/oauth2-proxy-htpasswd and auth/oauth2-proxy-access are
-# ExternalSecrets: 10-3-sso-secrets.yaml.
+# ExternalSecrets: 10-3-sso-secrets.yaml. With the GCP store on, auth/oauth2-proxy-google overrides
+# the Google client (components/external-secrets/gcp-store.yaml.tmpl).
 # Local (htpasswd) sessions have no email: the allow-list doesn't apply to them, and apps
 # keyed on the email header (Grafana) show their own login instead.
 apiVersion: v1
@@ -33,6 +34,7 @@ spec:
     deploymentAnnotations: {reloader.stakater.com/auto: "true"}   # roll when its secrets change
     config:
       existingSecret: oauth2-proxy
+      requiredSecretKeys: []       # client + cookie come in through envFrom below, not the chart's env
       emailDomains: []             # overridden by --email-domain below (from the secret store)
       upstreams: ["static://202"]
     # Google accounts allowed into localdev, for every app: [sso-access] in the secret store.
@@ -45,6 +47,13 @@ spec:
     extraEnv:
       - name: EMAIL_DOMAINS        # comma-separated, may be empty (= no domain-wide access)
         valueFrom: {secretKeyRef: {name: oauth2-proxy-access, key: email-domains}}
+    # OAUTH2_PROXY_CLIENT_ID/_SECRET and _COOKIE_SECRET. A later source wins, so the Google client from
+    # GCP (secrets:gcp-login) replaces the localdev store's; optional: without GCP, oauth2-proxy-google
+    # doesn't exist and the localdev values apply (placeholders by default: admin login only).
+    # (envFrom, not env: a duplicate env name fails the chart's server-side apply)
+    envFrom:
+      - secretRef: {name: oauth2-proxy}
+      - secretRef: {name: oauth2-proxy-google, optional: true}
     htpasswdFile:
       enabled: true
       existingSecret: oauth2-proxy-htpasswd
