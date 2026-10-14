@@ -2,11 +2,11 @@
 # your local.toml). profiles.toml is localdev's core; this file is for the applications developed with
 # it, in components/<name>/ or (with a `path`) in another project. No `default` here.
 #
-#   mise run cluster:profile usage      deploy the usage server (with Postgres)
+#   mise run cluster:profile usage      deploy the usage server (with Postgres) and a client feeding it
 
 [components.usage-server]
 requires = ["postgres"]        # database `usage` on postgres/postgres
 layer = "apps"                 # http://api.localhost/usage; readme: components/usage-server/readme.md
 
 [profiles]
-usage = { description = "Postgres + docs + the usage server", components = ["postgres", "docs", "usage-server"] }
+usage = { description = "Postgres + docs + the usage server + a client feeding it", components = ["postgres", "docs", "usage-server"] }

@@ -161,7 +161,7 @@ apiVersion: external-secrets.io/v1
 kind: ExternalSecret
 metadata: {name: myapp-db-app, namespace: myapp}
 spec:
-  refreshPolicy: OnChange         # generate on create and when this spec changes; never on a timer
+  refreshPolicy: CreatedOnce      # generate when the Secret is missing; never overwrite it
   target:
     name: myapp-db-app
     template:
@@ -172,9 +172,13 @@ spec:
         generatorRef: {apiVersion: generators.external-secrets.io/v1alpha1, kind: Password, name: myapp-db-app}
 ```
 
-The password is new whenever the Secret is generated again: on a new cluster, or when you edit the
-ExternalSecret. So whatever uses it to *create* something (an init Job running `CREATE ROLE`) must also
-*set* it on every run (`ALTER ROLE ... PASSWORD`), and run again after a change. The usage-server
+`CreatedOnce`, not `OnChange`: `mise run secrets:sync` force-syncs every ExternalSecret (an annotation),
+and `OnChange` would generate a new password each time. The flip side: an edit of the ExternalSecret
+doesn't reach an existing Secret; delete the Secret and ESO makes a new one.
+
+The password is new whenever the Secret is generated again: on a new cluster, or after you delete it.
+So whatever uses it to *create* something (an init Job running `CREATE ROLE`) must also *set* it on
+every run (`ALTER ROLE ... PASSWORD`), and run again after a change. The usage-server
 component is the reference (`components/usage-server/manifests/`, `mise run db-init`). Generated
 logins don't appear in cnav's Credentials tab: they're not in the store (pgweb still reaches every
 database through the admin login).

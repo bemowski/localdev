@@ -352,7 +352,7 @@ metadata:
   name: myapp-db-ro
   namespace: myapp
 spec:
-  refreshPolicy: OnChange               # generated once (and when this spec changes), never rotated
+  refreshPolicy: CreatedOnce            # generated once, never overwritten (see secrets.md)
   target:
     name: myapp-db-ro
     template:

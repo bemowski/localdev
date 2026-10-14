@@ -89,7 +89,7 @@ can't drift from the spec. Each batch is written in one transaction:
 |---|---|
 | deploy | the `usage` profile (`application-profiles.toml`, below): `mise run cluster:profile usage`. `mise run build usage-server` rebuilds |
 | URLs | `http://api.localhost/usage`, also `http://localhost/api/usage` (localdev's API host, prefix stripped; open, no API key yet), `http://usage.usage.svc` |
-| database | `usage` on `postgres/postgres`. The server only reads Secret `usage-db-app` (`host`, `port`, `dbname`, `username`, `password`, `uri`: the keys of CloudNativePG's `<cluster>-app` secret) and runs `usage_server/migrations/*.sql` at startup. Provisioning is a separate Job, `usage-db-init` (`manifests/50-2-1-usage-db-init.yaml`): as the Postgres admin (Secret `usage-db-admin`, which only the Job reads) it creates roles `usage` (owner) and `usage_ro` (read-only, Grafana) and the database, and sets both passwords. The passwords are generated in the cluster (ESO `Password` generators, `manifests/50-2-0-usage-secrets.yaml`): no secret-store entries, only the admin login comes from the store. Idempotent; `mise run db-init` re-runs it, needed after the passwords are regenerated (an edit of those ExternalSecrets). With CloudNativePG, that file is replaced (e.g. a Cluster `usage-db`, whose secret is `usage-db-app`) and the Deployment stays as is |
+| database | `usage` on `postgres/postgres`. The server only reads Secret `usage-db-app` (`host`, `port`, `dbname`, `username`, `password`, `uri`: the keys of CloudNativePG's `<cluster>-app` secret) and runs `usage_server/migrations/*.sql` at startup. Provisioning is a separate Job, `usage-db-init` (`manifests/50-2-1-usage-db-init.yaml`): as the Postgres admin (Secret `usage-db-admin`, which only the Job reads) it creates roles `usage` (owner) and `usage_ro` (read-only, Grafana) and the database, and sets both passwords. The passwords are generated in the cluster (ESO `Password` generators, `manifests/50-2-0-usage-secrets.yaml`): no secret-store entries, only the admin login comes from the store. Idempotent; `mise run db-init` re-runs it, needed after the passwords are regenerated (their Secrets deleted: `refreshPolicy: CreatedOnce`). With CloudNativePG, that file is replaced (e.g. a Cluster `usage-db`, whose secret is `usage-db-app`) and the Deployment stays as is |
 | Grafana | datasource **Usage** (uid `usage-pg`, read-only), provisioned from Secret `usage-db-ro` in `usage` (label `grafana_datasource`, read by Grafana's sidecar) |
 | metrics | `usage_events_total{type,result}`, `usage_batches_total{status}` on port `metrics` (9090) |
 | logs | logfmt, one line per batch |
@@ -108,14 +108,20 @@ code and migrations), `build.sh` (stages `docker/` + `openapi.yaml` as the build
 
 **In localdev.** `application-profiles.toml` (checked in, next to `profiles.toml`) registers the
 component (`requires = ["postgres"]`, `layer = "apps"`) and the `usage` profile (postgres, docs,
-usage-server). `mise run cluster:profile usage` (or `cluster:create usage`) deploys it;
+usage-server; the component includes usage-client-local, a client feeding this server, see Client below). `mise run cluster:profile usage` (or `cluster:create usage`) deploys it;
 `mise run cluster:profile dev` removes it.
 
 ## Client (`../usage-client/`)
 
 One stdlib-only Python pod (`docker/agent.py`) in `kube-system` that watches the cluster and sends
-events to `USAGE_URL` (default `http://usage.usage.svc`, set in the manifest). It's a localdev
-**infra** component named `usage-client` (`manifests/20-10-usage-client.yaml`).
+events to `USAGE_URL`, set in the manifest: the shared server, `https://api.stage.ops.dematic.dev/usage`
+today (prod later). It's a localdev **infra** component named `usage-client` (`manifests/20-10-usage-client.yaml`).
+
+**A second client for usage development:** this component also deploys `usage-client-local`
+(`manifests/50-3-usage-client-local.yaml`), the same image in namespace `usage`
+with `USAGE_URL=http://usage.usage.svc`, the local server (not `api.localhost`: in a pod that's the pod
+itself). Both clients send the same events, each to its own server; the ids are derived from the
+cluster id, so neither depends on the other. `USAGE_URL` in each manifest is the switch.
 
 | event | when |
 |---|---|
@@ -144,8 +150,8 @@ events to `USAGE_URL` (default `http://usage.usage.svc`, set in the manifest). I
   a restarted agent resends them and the server counts them as duplicates.
 - **Deploy:** always on in every localdev cluster: `profiles.toml` declares
   `[components.usage-client]` (`layer = "infra"`, `always = true`). With no usage server it
-  spools (and logs one warning). `USAGE_URL` in the manifest points at the in-cluster server for now;
-  a public endpoint later. `mise run build usage-client` rebuilds it. For other clusters, a Helm chart
+  spools (and logs one warning), e.g. off the internal network. `mise run build usage-client` rebuilds
+  it, and restarts usage-client-local too (label `app=usage-client`). For other clusters, a Helm chart
   (published to an OCI registry) is the planned next step.
 - **Tests:** `cd ../usage-client && mise run test` (unittest, plus a contract test of every event against the pinned `api/openapi-<version>.yaml`).
 

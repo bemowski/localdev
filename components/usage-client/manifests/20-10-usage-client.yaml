@@ -1,7 +1,9 @@
 # usage-client: watches this cluster and sends usage events (cluster created, heartbeat
-# with cluster size, profile changed, app deployed) to a usage server. Best-effort: events spool in an emptyDir.
-# Always on in localdev (profiles.toml), whether or not a usage server is running: without one, events
-# wait in the spool (72h / 1000 files) and the agent logs one warning.
+# with cluster size, profile changed, app deployed) to the shared usage server (USAGE_URL below: stage
+# today, prod later). Best-effort: events spool in an emptyDir. Always on in localdev (profiles.toml).
+# The server is on the internal network: off it (no VPN), events wait in the spool (72h / 1000 files)
+# and the agent logs one warning. Developing the usage server itself? The usage-server component adds a
+# second client, usage-client-local, that feeds the local server (its manifests/50-3-usage-client-local.yaml).
 #   build: mise run build usage-client      code: docker/agent.py
 #   optional: ConfigMap kube-system/localdev-host (host facts, written by localdev's tasks). Without it
 #   the facts are "unknown"; cluster.updated backfills them when it appears.
@@ -63,8 +65,8 @@ spec:
           image: localdev-registry:5005/usage-client:latest
           imagePullPolicy: Always
           env:
-            # where a usage server runs: the in-cluster one (usage-server component) for now; later a public endpoint
-            - {name: USAGE_URL, value: "http://usage.usage.svc"}
+            # the shared usage server (argo-app-of-apps stage-apps/usage-server.yaml); prod later
+            - {name: USAGE_URL, value: "https://api.stage.ops.dematic.dev/usage"}
           volumeMounts:
             - {name: spool, mountPath: /spool}
           resources:

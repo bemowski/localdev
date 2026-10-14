@@ -1,0 +1,63 @@
+# usage-client-local: a second usage-client that feeds THIS cluster's usage server (component
+# usage-server), for developing usage features: it comes and goes with the usage-server component.
+# The always-on usage-client (kube-system) keeps sending to the shared server; both are stateless and
+# derive event ids from the cluster id, so each server gets the same events and drops repeats itself.
+#   image: usage-client's (mise run build usage-client restarts both: label app=usage-client)
+#   USAGE_URL: the in-cluster address. Not http://api.localhost/usage: in a pod, *.localhost is the pod.
+#   RBAC: ClusterRole usage-client (components/usage-client, always on).
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: usage
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: usage-client-local
+  namespace: usage
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: usage-client-local
+roleRef: {apiGroup: rbac.authorization.k8s.io, kind: ClusterRole, name: usage-client}
+subjects:
+  - {kind: ServiceAccount, name: usage-client-local, namespace: usage}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: usage-client-local
+  namespace: usage
+  # app=usage-client: rebuilt with usage-client; localdev/component: usage-server's cnav row
+  labels: {app: usage-client, localdev/component: usage-server}
+spec:
+  replicas: 1
+  strategy: {type: Recreate}
+  selector:
+    matchLabels: {app: usage-client}
+  template:
+    metadata:
+      labels: {app: usage-client}
+    spec:
+      serviceAccountName: usage-client-local
+      enableServiceLinks: false
+      terminationGracePeriodSeconds: 10      # SIGTERM: one last flush, then exit
+      containers:
+        - name: usage-client
+          image: localdev-registry:5005/usage-client:latest
+          imagePullPolicy: Always
+          env:
+            - {name: USAGE_URL, value: "http://usage.usage.svc"}   # the local usage-server
+          volumeMounts:
+            - {name: spool, mountPath: /spool}
+          resources:
+            requests: {cpu: 5m, memory: 16Mi}
+            limits: {memory: 64Mi}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+      volumes:
+        - name: spool                          # ephemeral: losing events on a restart is fine
+          emptyDir: {sizeLimit: 20Mi}
