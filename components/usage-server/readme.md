@@ -93,7 +93,7 @@ can't drift from the spec. Each batch is written in one transaction:
 | Grafana | datasource **Usage** (uid `usage-pg`, read-only), provisioned through an ExternalSecret in `monitoring` |
 | metrics | `usage_events_total{type,result}`, `usage_batches_total{status}` on port `metrics` (9090) |
 | logs | logfmt, one line per batch |
-| image | `us-central1-docker.pkg.dev/scs-d-common-nonprod/docker-registry/tools/cluster/usage/server:<VERSION>`, version in `VERSION`. `mise run release` builds linux/amd64, pushes it and tags git `usage-server-v<VERSION>`; it refuses a dirty tree, an API version not frozen in `api/`, or a version already pushed. Shared clusters deploy it from argo-app-of-apps (`cluster-workloads/usage`) |
+| image | `us-central1-docker.pkg.dev/scs-d-common-nonprod/docker-registry/tools/cluster/usage/server:<VERSION>`, version in `VERSION`. `mise run release` builds linux/amd64, pushes it and tags git `usage-server-v<VERSION>`; it refuses a dirty tree, an API version not frozen in `api/`, or a version already pushed. Shared clusters deploy it from argo-app-of-apps: `cluster-workloads/usage-server` (`stage-apps/usage-server.yaml` on stage, at https://api.stage.ops.dematic.dev/usage) |
 
 ```bash
 mise run test     # validation tests + API tests on a throwaway DB (localdev Postgres; skipped if absent)
