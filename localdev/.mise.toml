@@ -235,7 +235,7 @@ if [ ! -s "$adc" ]; then
     [ "$auto" != true ] || fail "no gcloud application-default login"
     gcloud auth application-default login
 fi
-# the credential works and can see the OAuth client (metadata only, never the value)
+# the credential works and can see and read the OAuth client (metadata and permissions only, never the value)
 token=$(gcloud auth application-default print-access-token 2>/dev/null) \
     || fail "gcloud application-default login expired or invalid (gcloud auth application-default login)"
 quota=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get("quota_project_id", ""))' "$adc")
@@ -243,6 +243,13 @@ code=$(curl -s -o /dev/null -w '%{http_code}' -H @<(printf 'Authorization: Beare
     ${quota:+-H "x-goog-user-project: $quota"} \
     "https://secretmanager.googleapis.com/v1/projects/$LOCALDEV_GCP_PROJECT/secrets/localdev-sso-oauth") || code=000
 [ "$code" = 200 ] || fail "can't read secret localdev-sso-oauth in $LOCALDEV_GCP_PROJECT (HTTP $code)"
+# seeing it isn't reading it: ESO needs secretmanager.versions.access (role Secret Manager Secret Accessor)
+perms=$(curl -s -X POST -H @<(printf 'Authorization: Bearer %s\\n' "$token") \
+    ${quota:+-H "x-goog-user-project: $quota"} -H 'Content-Type: application/json' \
+    -d '{"permissions": ["secretmanager.versions.access"]}' \
+    "https://secretmanager.googleapis.com/v1/projects/$LOCALDEV_GCP_PROJECT/secrets/localdev-sso-oauth:testIamPermissions") || perms=
+grep -q '"secretmanager.versions.access"' <<< "$perms" \
+    || fail "$(gcloud config get account 2>/dev/null || echo you) can see but not read secret localdev-sso-oauth in $LOCALDEV_GCP_PROJECT: needs roles/secretmanager.secretAccessor"
 
 # a fresh cluster: wait for ESO's CRDs (k3s installs the chart)
 for crd in clustersecretstores externalsecrets; do
