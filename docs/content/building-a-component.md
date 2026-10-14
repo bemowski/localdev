@@ -260,6 +260,10 @@ Don't put secret values in the manifest: declare an **ExternalSecret** against t
 (in its own file), keep the values in your gitignored `secrets.store.toml` (fixed dev values can go in
 your component's `secrets.defaults.toml`), and annotate the Deployment for Reloader. See [Secrets](secrets.md).
 
+That is for secrets that come from **outside** your app: an API key, an OAuth client, the Postgres admin
+login. Secrets your app only shares with itself, such as its own database logins, need no store entry:
+generate them in the cluster ([Secrets your app makes itself](secrets.md#secrets-your-app-makes-itself)).
+
 ## Databases and other setup
 
 Postgres runs in namespace `postgres` with fixed local credentials (`app` / `localdev`); from a component,
@@ -290,12 +294,16 @@ Deployment. The usage server (`components/usage-server/manifests/`) is the refer
 - **The Deployment reads one Secret**, `<name>-db-app`, with the keys of CloudNativePG's application
   secret: `host`, `port`, `dbname`, `username`, `password`, `uri`. It retries until the database
   answers. It holds no admin login and doesn't know who provisioned the database.
-- **In localdev, ExternalSecrets build that Secret** from your `secrets.defaults.toml` entry, adding
-  host, port and database name in a template. A second ExternalSecret, read only by the Job, carries
-  the Postgres admin login (store entry `postgres-app`).
-- **A Job in its own manifest file** creates the role and database idempotently. k3s runs it when the
-  file is first applied, and replaces and re-runs it when its spec changes. It doesn't recreate a
-  deleted Job, so give your component a task that deletes and re-applies it.
+- **An ExternalSecret generates that Secret**: an ESO `Password` generator makes the password once,
+  and a template adds the user, host, port and database name. No store entry, and the password never
+  leaves the cluster ([Secrets your app makes itself](secrets.md#secrets-your-app-makes-itself)).
+  A second ExternalSecret, read only by the Job, carries the Postgres admin login (store entry
+  `postgres-app`): the one secret that really comes from outside.
+- **A Job in its own manifest file** creates the role and database idempotently, and **sets the role's
+  password from the Secret on every run** (`ALTER ROLE ... PASSWORD`), so a regenerated password is put
+  right by the next run. k3s runs it when the file is first applied, and replaces and re-runs it when
+  its spec changes. It doesn't recreate a deleted Job, so give your component a task that deletes and
+  re-applies it (usage-server: `mise run db-init`).
 - **Elsewhere, that file is swapped**, for example for a CloudNativePG Cluster named `<name>-db`,
   whose generated secret is `<name>-db-app`. The Deployment doesn't change.
 
@@ -315,44 +323,45 @@ labelled Secret (or ConfigMap) and Grafana picks it up within seconds. Three pie
    in `/etc/grafana/provisioning/datasources/`, and re-reads them when its reload API is called.
    [Grafana docs: Provision Grafana](https://grafana.com/docs/grafana/latest/administration/provisioning/#data-sources).
 2. **A watcher sidecar** ([kiwigrid/k8s-sidecar](https://github.com/kiwigrid/k8s-sidecar)): the
-   `grafana-sc-datasources` container in the Grafana pod watches namespace **`monitoring`** for
+   `grafana-sc-datasources` container in the Grafana pod watches **every namespace** for
    ConfigMaps and Secrets labelled **`grafana_datasource: "1"`**, writes each one's data keys as files
-   into that folder, and calls Grafana's reload API.
+   into that folder, and calls Grafana's reload API. Grafana reads only the `*.yaml` files.
 3. **The Grafana Helm chart** (part of kube-prometheus-stack, `manifests/20-infra/20-2-monitoring.yaml`)
-   adds and wires up the sidecar (its `sidecar.datasources.*` values; on by default).
+   adds and wires up the sidecar (its `sidecar.datasources.*` values; `searchNamespace: ALL`).
 
 The object's lifetime is the datasource's lifetime: remove the component (`mise run cluster:profile`
 without it) and the Secret goes, and so does the datasource.
 
 ### Example: a Postgres datasource for your database
 
-The credentials stay in the [secret store](secrets.md): an **ExternalSecret** in `monitoring`
-renders the provisioning file into a Secret with the label. This is what the usage-server component does
+Keep the datasource next to the login it uses, in your own namespace: the ExternalSecret that
+generates your read-only login also renders the provisioning file, and labels the Secret for the
+sidecar. One Secret serves both your init Job (`username`, `password`) and Grafana (the `.yaml` key).
+This is what the usage-server component does
 (`components/usage-server/manifests/50-2-0-usage-secrets.yaml`).
 
-```toml
-# your component's secrets.defaults.toml: a read-only login (dev value)
-[myapp-ro]
-username = "myapp_ro"
-password = "myapp_ro"
-```
-
 ```yaml
+apiVersion: generators.external-secrets.io/v1alpha1
+kind: Password
+metadata: {name: myapp-db-ro, namespace: myapp}
+spec: {length: 32, symbols: 0}          # no "$": Grafana expands $VAR in provisioning files
+---
 apiVersion: external-secrets.io/v1
 kind: ExternalSecret
 metadata:
-  name: myapp-grafana-datasource
-  namespace: monitoring                 # the only namespace the datasource sidecar watches
+  name: myapp-db-ro
+  namespace: myapp
 spec:
-  refreshInterval: 1h
-  secretStoreRef: {kind: ClusterSecretStore, name: localdev}
+  refreshPolicy: OnChange               # generated once (and when this spec changes), never rotated
   target:
-    name: myapp-grafana-datasource
+    name: myapp-db-ro
     template:
       engineVersion: v2
       metadata:
         labels: {grafana_datasource: "1"}   # what the sidecar looks for
       data:
+        username: myapp_ro                  # for the init Job, which creates the login
+        password: "{{ .password }}"
         myapp-datasource.yaml: |            # file name in Grafana's provisioning folder: keep it unique
           apiVersion: 1
           datasources:
@@ -360,16 +369,17 @@ spec:
               uid: myapp-pg                 # stable: dashboards refer to the datasource by uid
               type: grafana-postgresql-datasource
               url: postgres-rw.postgres.svc:5432
-              user: {{ .username }}
+              user: myapp_ro
               jsonData: {database: myapp, sslmode: disable, postgresVersion: 1500}
               secureJsonData: {password: "{{ .password }}"}
-  data:
-    - {secretKey: username, remoteRef: {key: myapp-ro, property: username}}
-    - {secretKey: password, remoteRef: {key: myapp-ro, property: password}}
+  dataFrom:
+    - sourceRef:
+        generatorRef: {apiVersion: generators.external-secrets.io/v1alpha1, kind: Password, name: myapp-db-ro}
 ```
 
-The login must exist in Postgres: create it in your `create-db` init container (see
-[Databases](#databases-and-other-setup)) and give it read access, including to tables created later:
+The login must exist in Postgres: create it in your init Job, setting its password from the Secret
+on every run (see [Databases](#databases-and-other-setup)), and give it read access, including to
+tables created later:
 
 ```sql
 -- in database myapp, as the Postgres admin
@@ -390,7 +400,8 @@ kubectl -n monitoring logs deploy/grafana -c grafana-sc-datasources | grep myapp
 
 **Gotchas:**
 
-- The Secret must be in `monitoring`; anywhere else it's ignored.
+- The sidecar also writes the Secret's other keys (`username`, `password`) into the folder; Grafana
+  ignores files that aren't `*.yaml`, so they're harmless.
 - Every datasource needs a unique `uid` and `name`, and the file name (the `data:` key) must not
   collide with another component's.
 - Grafana expands `$VAR` and `${VAR}` in provisioning files as environment variables: a password
@@ -421,4 +432,4 @@ from the UI.)
 3. Registered: `local.toml` (external) or `profiles.toml` (in this repo); `python3 profile.py check`.
 4. `mise run cluster:profile <profile>`; the app is on `http://localhost/<name>/`.
    Optional: an API on `http://api.localhost/<name>/` (open, or keyed with an `api-<name>` entry).
-5. Optional: a Grafana datasource (ExternalSecret in `monitoring`) and `dashboards/`.
+5. Optional: a Grafana datasource (a labelled Secret in your namespace) and `dashboards/`.

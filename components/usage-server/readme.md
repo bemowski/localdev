@@ -15,7 +15,7 @@ api/               frozen versions, openapi-<info.version>.yaml (checked in; cli
 examples/          request bodies: *.json valid, invalid/*.json must be rejected
 scripts/           check_examples.py (examples + frozen versions), api_versions.py (freeze)
 redocly.yaml       lint rules
-manifests/ docker/ build.sh VERSION secrets.defaults.toml tests/     the server component
+manifests/ docker/ build.sh VERSION tests/     the server component
 ../usage-client/   in-cluster event emitter: stdlib Python pod in kube-system (infra component)
 ```
 
@@ -89,8 +89,8 @@ can't drift from the spec. Each batch is written in one transaction:
 |---|---|
 | deploy | the `usage` profile (`application-profiles.toml`, below): `mise run cluster:profile usage`. `mise run build usage-server` rebuilds |
 | URLs | `http://api.localhost/usage`, also `http://localhost/api/usage` (localdev's API host, prefix stripped; open, no API key yet), `http://usage.usage.svc` |
-| database | `usage` on `postgres/postgres`. The server only reads Secret `usage-db-app` (`host`, `port`, `dbname`, `username`, `password`, `uri`: the keys of CloudNativePG's `<cluster>-app` secret) and runs `usage_server/migrations/*.sql` at startup. Provisioning is a separate Job, `usage-db-init` (`manifests/50-2-1-usage-db-init.yaml`): as the Postgres admin (Secret `usage-db-admin`, which only the Job reads) it creates roles `usage` (owner) and `usage_ro` (read-only, Grafana) and the database, from the secret store (`secrets.defaults.toml`). Idempotent; `mise run db-init` re-runs it. With CloudNativePG, that file is replaced (e.g. a Cluster `usage-db`, whose secret is `usage-db-app`) and the Deployment stays as is |
-| Grafana | datasource **Usage** (uid `usage-pg`, read-only), provisioned through an ExternalSecret in `monitoring` |
+| database | `usage` on `postgres/postgres`. The server only reads Secret `usage-db-app` (`host`, `port`, `dbname`, `username`, `password`, `uri`: the keys of CloudNativePG's `<cluster>-app` secret) and runs `usage_server/migrations/*.sql` at startup. Provisioning is a separate Job, `usage-db-init` (`manifests/50-2-1-usage-db-init.yaml`): as the Postgres admin (Secret `usage-db-admin`, which only the Job reads) it creates roles `usage` (owner) and `usage_ro` (read-only, Grafana) and the database, and sets both passwords. The passwords are generated in the cluster (ESO `Password` generators, `manifests/50-2-0-usage-secrets.yaml`): no secret-store entries, only the admin login comes from the store. Idempotent; `mise run db-init` re-runs it, needed after the passwords are regenerated (an edit of those ExternalSecrets). With CloudNativePG, that file is replaced (e.g. a Cluster `usage-db`, whose secret is `usage-db-app`) and the Deployment stays as is |
+| Grafana | datasource **Usage** (uid `usage-pg`, read-only), provisioned from Secret `usage-db-ro` in `usage` (label `grafana_datasource`, read by Grafana's sidecar) |
 | metrics | `usage_events_total{type,result}`, `usage_batches_total{status}` on port `metrics` (9090) |
 | logs | logfmt, one line per batch |
 | image | `us-central1-docker.pkg.dev/scs-d-common-nonprod/docker-registry/tools/cluster/usage/server:<VERSION>`, version in `VERSION`. `mise run release` builds linux/amd64, pushes it and tags git `usage-server-v<VERSION>`; it refuses a dirty tree, an API version not frozen in `api/`, or a version already pushed. Shared clusters deploy it from argo-app-of-apps: `cluster-workloads/usage-server` (`stage-apps/usage-server.yaml` on stage, at https://api.stage.ops.dematic.dev/usage) |
@@ -98,14 +98,13 @@ can't drift from the spec. Each batch is written in one transaction:
 ```bash
 mise run test     # validation tests + API tests on a throwaway DB (localdev Postgres; skipped if absent)
 mise run dev      # run locally on :8080 against localdev's `usage` database
-mise run db-init  # re-run the database init Job in localdev (idempotent; e.g. after a password change)
+mise run db-init  # re-run the database init Job in localdev (idempotent; e.g. after the passwords are regenerated)
 mise run image    # docker build (standalone: IMAGE=usage-server:dev)
 mise run release  # bump VERSION and commit first; builds, pushes and tags (gcloud auth configure-docker us-central1-docker.pkg.dev)
 ```
 
 Server layout: `manifests/` (applied by k3s), `docker/` (Dockerfile, requirements, `usage_server/`
-code and migrations), `build.sh` (stages `docker/` + `openapi.yaml` as the build context),
-`secrets.defaults.toml` (secret-store entries), `tests/`.
+code and migrations), `build.sh` (stages `docker/` + `openapi.yaml` as the build context), `tests/`.
 
 **In localdev.** `application-profiles.toml` (checked in, next to `profiles.toml`) registers the
 component (`requires = ["postgres"]`, `layer = "apps"`) and the `usage` profile (postgres, docs,

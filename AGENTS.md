@@ -57,10 +57,11 @@ component. **Do not edit localdev's core to make one app work.**
 | deploy after Postgres/NATS, in the right layer | `requires = [...]` and `layer = "..."` in `local.toml` |
 | a row in cnav's status column | label workloads `localdev/component: <name>` |
 | secrets | an ExternalSecret against ClusterSecretStore `localdev`, dev values in your `secrets.defaults.toml` |
+| your app's own logins (its DB user) | an ExternalSecret with a `Password` generator: no store entry ([secrets.md](docs/content/secrets.md#secrets-your-app-makes-itself)) |
 | a login shown in cnav's Credentials tab | a store entry with a `password` key, or an `api-<name>` entry (automatic) |
 | roll pods when a secret changes | annotation `reloader.stakater.com/auto: "true"` |
 | a database / one-time setup | an idempotent init container (see the guide) |
-| a Grafana datasource or dashboards | a Secret labelled `grafana_datasource: "1"` in `monitoring`; `dashboards/*.json` |
+| a Grafana datasource or dashboards | a Secret labelled `grafana_datasource: "1"` (any namespace, e.g. your own); `dashboards/*.json` |
 | show up in cnav's Events | normal Kubernetes Events (anything that emits them, or create one) |
 
 **If something really can't be done from a component** (e.g. a new host port, which lives in

@@ -144,6 +144,41 @@ ESO can also build values with a template, e.g. a connection string from several
     fresh cluster, ExternalSecrets wait for ESO to install, so put them in a separate file from your
     workloads (`30-1-postgres-secrets.yaml` next to `30-2-postgres.yaml`).
 
+## Secrets your app makes itself
+
+The store is for secrets that come from **outside** your app: an API key, an OAuth client, the
+Postgres admin login. A secret your app only shares with itself, such as its own database login
+(or a read-only login for Grafana, in the same cluster), doesn't need an entry anywhere: an ESO
+**generator** makes it in the cluster, once, and it never leaves.
+
+```yaml
+apiVersion: generators.external-secrets.io/v1alpha1
+kind: Password
+metadata: {name: myapp-db-app, namespace: myapp}
+spec: {length: 32, symbols: 0}
+---
+apiVersion: external-secrets.io/v1
+kind: ExternalSecret
+metadata: {name: myapp-db-app, namespace: myapp}
+spec:
+  refreshPolicy: OnChange         # generate on create and when this spec changes; never on a timer
+  target:
+    name: myapp-db-app
+    template:
+      engineVersion: v2
+      data: {username: myapp, password: "{{ .password }}", host: postgres-rw.postgres.svc, port: "5432", dbname: myapp}
+  dataFrom:
+    - sourceRef:
+        generatorRef: {apiVersion: generators.external-secrets.io/v1alpha1, kind: Password, name: myapp-db-app}
+```
+
+The password is new whenever the Secret is generated again: on a new cluster, or when you edit the
+ExternalSecret. So whatever uses it to *create* something (an init Job running `CREATE ROLE`) must also
+*set* it on every run (`ALTER ROLE ... PASSWORD`), and run again after a change. The usage-server
+component is the reference (`components/usage-server/manifests/`, `mise run db-init`). Generated
+logins don't appear in cnav's Credentials tab: they're not in the store (pgweb still reaches every
+database through the admin login).
+
 ## Moving to a cloud store
 
 Because every consumer asks for `ClusterSecretStore localdev`, moving to Google Secret Manager is a

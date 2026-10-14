@@ -18,6 +18,7 @@ metadata:
   namespace: usage
   # localdev/component: localdev's cnav lists this in its status column (group: apps)
   labels: {app: usage, localdev/component: usage-server}
+  annotations: {reloader.stakater.com/auto: "true"}   # roll when usage-db-app changes (e.g. regenerated)
 spec:
   replicas: 1
   selector:

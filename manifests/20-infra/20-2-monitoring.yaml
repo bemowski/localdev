@@ -109,6 +109,9 @@ spec:
           auto_assign_org_role: Admin   # the SSO allow-list is the gate
       sidecar:
         datasources:
+          # datasources from Secrets/ConfigMaps labelled grafana_datasource=1 in ANY namespace: a
+          # component keeps its datasource next to the login it uses (docs: building-a-component.md)
+          searchNamespace: ALL
           # Tempo span-metric exemplars carry `traceID`: clickable trace dots on Prometheus graphs
           exemplarTraceIdDestinations:
             datasourceUid: tempo
