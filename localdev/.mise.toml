@@ -17,7 +17,7 @@ KUBECONFIG = "{{config_root}}/.kubeconfig"   # never touch ~/.kube/config
 LOCALDEV_ROOT = "{{config_root}}"            # expanded in k3d.yaml (absolute host paths)
 
 LOCALDEV_GCP = "on" # this can be set to 'off' to test local only sign-in
-LOCALDEV_GCP_PROJECT = "localdev-511501"     # DematicNonProd/localdev
+LOCALDEV_GCP_PROJECT = "localdev-silr"     # DematicNonProd/Development/localdev
 
 
 [tasks."cluster:create"]
