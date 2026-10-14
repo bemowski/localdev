@@ -1,4 +1,4 @@
-# localdev docs — markdown (kube/localdev/docs) rendered with MkDocs Material at build time, served by nginx.
+# localdev docs — markdown (localdev's docs/) rendered with MkDocs Material at build time, served by nginx.
 #   build + push: mise run build docs   (components/docs/build.sh stages docs/ into the context)
 #   run locally:  docker run --rm -p 8080:8080 localhost:5005/docs   -> http://localhost:8080/docs/
 

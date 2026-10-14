@@ -1,5 +1,5 @@
 # api-auth: API-key check for api.localhost (Traefik forwardAuth). Stdlib only.
-#   build + push: mise run build api-auth    (from kube/localdev)
+#   build + push: mise run build api-auth    (from the localdev root)
 FROM python:3.13-alpine
 COPY server.py /app/server.py
 USER 65534

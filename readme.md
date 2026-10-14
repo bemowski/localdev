@@ -1,4 +1,4 @@
-# kube/localdev
+# localdev
 
 Ephemeral local Kubernetes (k3d) with path-based routing on `http://localhost/<app>`, behind Google SSO.
 

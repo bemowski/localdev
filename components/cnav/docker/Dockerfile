@@ -1,5 +1,5 @@
 # cnav — cluster navigator: cards (cards.yaml) + live status column (status.yaml, /api/status)
-#   build + push: mise run build cnav    (from kube/localdev)
+#   build + push: mise run build cnav    (from the localdev root)
 #   run locally:  docker run --rm -p 8080:8080 localhost:5005/cnav   (status shows "unavailable" outside a cluster)
 FROM python:3.13-alpine
 

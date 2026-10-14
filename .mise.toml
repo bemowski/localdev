@@ -1,4 +1,4 @@
-# kube/localdev — ephemeral local kubernetes (k3d)
+# localdev — ephemeral local kubernetes (k3d)
 #   cluster:  mise run cluster:create [profile] | cluster:profile [profile] | cluster:status | cluster:destroy | cluster:recreate | cluster:secrets | cluster:clean
 #   components/tools: mise run build <component> | pg:psql | kn:forward | keycloak:apply | keycloak:export
 #   secrets:  mise run secrets:sync | secrets:list | secrets:migrate | secrets:gcp-login   (secret stores for External Secrets)
@@ -7,9 +7,9 @@
 
 [tools]
 k3d = '5.9.0'
-kubectl = '1.37.1'   # overrides root 1.27
+kubectl = '1.37.1'
 python = '3.12.15'       # profile.py, grafana/dashtool.py, realmtool.py (stdlib only; tomllib needs 3.11+)
-yq = '4.54.1'            # cluster:profile (don't rely on the monorepo root's toolchain)
+yq = '4.54.1'            # cluster:profile
 
 [env]
 CLUSTER_NAME = "localdev"

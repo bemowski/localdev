@@ -2,7 +2,7 @@
 
 localdev is an ephemeral local Kubernetes cluster ([k3d](https://k3d.io)) for development. Everything is
 served on `http://localhost/<app>`, behind single sign-on, and the whole cluster is defined by the files in
-`kube/localdev`: edit a manifest and it is applied within seconds.
+this repo: edit a manifest and it is applied within seconds.
 
 It is meant to replace the docker compose files developers use to run local tools, with a light
 Kubernetes that runs their apps the way production does. All it needs is mise and docker.
@@ -17,4 +17,4 @@ Kubernetes that runs their apps the way production does. All it needs is mise an
 
 !!! tip "Where things are"
     Start at [http://localhost/](http://localhost/), the cluster navigator: a card for every app, a live
-    status column, the exposed ports and recent cluster events. These docs are built from `kube/localdev/docs/content/*.md`.
+    status column, the exposed ports and recent cluster events. These docs are built from `docs/content/*.md` in the localdev repo.

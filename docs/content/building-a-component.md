@@ -8,13 +8,13 @@ hook, either inside this repo or, more usually, inside your own project.
 === "In your project (external)"
 
     Keep the component next to your code, e.g. `~/src/myapp/localdev/`, and register it in your
-    **`local.toml`** (gitignored, next to `profiles.toml` in `kube/localdev`):
+    **`local.toml`** (gitignored, next to `profiles.toml` in the localdev root):
 
     ```toml
     default = "myapp"                  # optional: your default profile
 
     [components.myapp]
-    path = "~/src/myapp/localdev"      # or relative to kube/localdev
+    path = "~/src/myapp/localdev"      # or relative to the localdev root
     layer = "apps"                     # platform|infra|tools|apps
     requires = ["postgres", "nats"]    # added automatically
 
@@ -27,14 +27,14 @@ hook, either inside this repo or, more usually, inside your own project.
 
 === "In this repo"
 
-    Create `kube/localdev/components/<name>/` and add the name to the profiles you want in
+    Create `components/<name>/` and add the name to the profiles you want in
     `profiles.toml`. Good for shared tools everyone uses.
 
 ### Workspace: linked or copied
 
 The cluster can only read host folders that are mounted into it. `cluster:create` mounts the
 **workspace**, read-only: by default the folder that holds this repo, so its sibling projects
-(override with `LOCALDEV_WORKSPACE`, e.g. in a gitignored `kube/localdev/.mise.local.toml`).
+(override with `LOCALDEV_WORKSPACE`, e.g. in a gitignored `.mise.local.toml` in the localdev root).
 
 - **Inside the workspace:** the component's `manifests/` is linked. Save a manifest and it is applied.
 - **Outside it:** the manifests are **copied** when the profile is applied. After editing them, run
@@ -406,7 +406,7 @@ Saving UI edits back to the file:
 
 - **In-repo component** (`components/<name>/`): `mise run grafana:export "<title>"` updates the file in place.
 - **External component** (`local.toml` path): its dashboards are *copied* into the cluster, and
-  `grafana:export` doesn't know your folder. It writes a new file under `kube/localdev/grafana/dashboards/`
+  `grafana:export` doesn't know your folder. It writes a new file under localdev's `grafana/dashboards/`
   instead, which duplicates the uid (and a duplicate uid stops Grafana applying any dashboard file).
   Move that file over your component's copy right away, then `mise run cluster:profile <profile>`
   to copy it in again.

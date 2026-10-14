@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Grafana dashboard tooling for kube/localdev (driven by the grafana:* mise tasks).
+"""Grafana dashboard tooling for localdev (driven by the grafana:* mise tasks).
 
 grafana/dashboards/<folder>/*.json is provisioned into Grafana with one Grafana folder
 per directory (platform, infra, tools, apps). This tool moves dashboards between that
@@ -29,7 +29,7 @@ import urllib.request
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent / "dashboards"          # always-on dashboards
-BASE = ROOT.parent.parent                                        # kube/localdev
+BASE = ROOT.parent.parent                                        # the localdev root
 COMPONENTS = BASE / "components"                                 # components/<name>/dashboards
 
 

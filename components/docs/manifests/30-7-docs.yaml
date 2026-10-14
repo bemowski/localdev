@@ -1,4 +1,4 @@
-# Docs at /docs/ (behind SSO): MkDocs site built from kube/localdev/docs by `mise run build docs`.
+# Docs at /docs/ (behind SSO): MkDocs site built from localdev's docs/ by `mise run build docs`.
 apiVersion: v1
 kind: Namespace
 metadata:

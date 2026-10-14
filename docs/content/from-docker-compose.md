@@ -21,7 +21,7 @@ The host ports are the same, so connection strings rarely change. Then:
 2. Remove those services from your compose file (or stop them: the ports must be free).
 3. You also get a database UI (`/pgweb`), a NATS UI (`/nats`), metrics and logs in Grafana.
 
-Postgres data lives in `kube/localdev/runtime.data/postgres` and survives cluster rebuilds.
+Postgres data lives in localdev's `runtime.data/postgres` and survives cluster rebuilds.
 
 ## Stage 2: run your app in the cluster
 

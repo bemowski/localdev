@@ -61,7 +61,7 @@ The store's values are merged from these files, later ones winning:
 | **`secrets.store.toml`** | **no** (gitignored) | your real secrets and any overrides |
 
 ```toml
-# kube/localdev/secrets.store.toml
+# secrets.store.toml (localdev root)
 [sso]
 google-client-id = "1234-abc.apps.googleusercontent.com"
 google-client-secret = "GOCSPX-..."

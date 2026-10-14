@@ -78,7 +78,7 @@ changes inside the cluster that a recreate would lose.
 
 ## Working loop
 
-Run from `kube/localdev/`. For `kubectl`, use the cluster's kubeconfig:
+Run from the localdev repo root. For `kubectl`, use the cluster's kubeconfig:
 `KUBECONFIG=$PWD/.kubeconfig kubectl ...`.
 
 ```bash
@@ -128,6 +128,6 @@ External projects can point their agents here with a paragraph like this:
 ```markdown
 ## Local Kubernetes (localdev)
 This project runs locally in localdev as an external component: `localdev/` (manifests/, build.sh).
-Follow <path-to>/kube/localdev/AGENTS.md: integrate through that folder and the developer's
+Follow <path-to>/localdev/AGENTS.md: integrate through that folder and the developer's
 local.toml; don't modify localdev itself.
 ```

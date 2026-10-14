@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Keycloak realm tooling for kube/localdev (driven by the keycloak:* mise tasks).
+"""Keycloak realm tooling for localdev (driven by the keycloak:* mise tasks).
 
 components/keycloak/realms/<realm>.json is the source of truth, applied by `mise run keycloak:apply`
 (keycloak-config-cli). This tool goes the other way:

@@ -31,7 +31,7 @@ import tomllib
 from pathlib import Path
 
 LOCALDEV = Path(__file__).resolve().parents[2]
-# kube/localdev/profile.py (component folders, local.toml) - loaded by path: "profile" is also a stdlib module
+# localdev's profile.py (component folders, local.toml) - loaded by path: "profile" is also a stdlib module
 _spec = importlib.util.spec_from_file_location("localdev_profile", LOCALDEV / "profile.py")
 profiles = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(profiles)

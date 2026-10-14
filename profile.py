@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Cluster profiles for kube/localdev (driven by the cluster:* mise tasks).
+"""Cluster profiles for localdev (driven by the cluster:* mise tasks).
 
 profiles.toml names which optional components (components/<name>/) a cluster runs.
 application-profiles.toml (checked in, same format) adds the profiles and metadata of application

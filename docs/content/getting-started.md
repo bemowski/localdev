@@ -114,7 +114,7 @@ Set up your platform:
 
 Then, on every platform:
 
-- **`mise install`** in `kube/localdev` (run `mise trust` first if asked). This gets k3d, kubectl,
+- **`mise install`** in the localdev repo (run `mise trust` first if asked). This gets k3d, kubectl,
   kn, yq and Python.
 - **`secrets.store.toml`** (optional): the Google OAuth client, the cookie secret and the local admin
   password. Without it you sign in as `admin` / `admin` and Google sign-in is off. See [Secrets](secrets.md), and the readme for the
@@ -125,7 +125,7 @@ If something doesn't work on your platform, see [Platform notes](platform-notes.
 ## Create a cluster
 
 ```bash
-cd kube/localdev
+cd localdev
 mise run cluster:create          # default profile (dev), or: mise run cluster:create lite|dev|knative|full
 ```
 
