@@ -1,2 +1,9 @@
+.kubeconfig
+secrets.env
+secrets
+runtime.data/
+runtime.profile/
+local.toml
+.mise.local.toml
+secrets.store.toml
 **/__pycache__
-

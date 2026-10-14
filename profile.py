@@ -5,7 +5,7 @@ profiles.toml names which optional components (components/<name>/) a cluster run
 application-profiles.toml (checked in, same format) adds the profiles and metadata of application
 components, kept apart from the core ones (e.g. usage-server). local.toml (gitignored, same format) adds
 a developer's own profiles and EXTERNAL components - folders in other projects:
-[components.<name>] path = "../../../myapp/localdev". This tool builds runtime.profile/, the
+[components.<name>] path = "../myapp/localdev". This tool builds runtime.profile/, the
 "active view" the cluster reads - links, so edits to the real files stay live:
 
   runtime.profile/name          current profile

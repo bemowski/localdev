@@ -6,7 +6,7 @@
 # platform, infra and apps (manifests/, grafana/dashboards/) are always deployed.
 # application-profiles.toml (checked in, same format) adds application components and their profiles.
 # local.toml (gitignored, same format) adds your own profiles, a `default`, and EXTERNAL components
-# living in other projects: [components.myapp] path = "../../../myapp/localdev" (see the docs).
+# living in other projects: [components.myapp] path = "../myapp/localdev" (see the docs).
 #
 #   mise run cluster:create [profile]   create with a profile (default below, or the last one used)
 #   mise run cluster:profile            list profiles
