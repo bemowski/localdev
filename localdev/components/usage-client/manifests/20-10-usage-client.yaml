@@ -1,21 +1,21 @@
-# usage cluster-agent: watches this cluster and sends usage events (cluster created, heartbeat
+# usage-client: watches this cluster and sends usage events (cluster created, heartbeat
 # with cluster size, profile changed, app deployed) to a usage server. Best-effort: events spool in an emptyDir.
 # Always on in localdev (profiles.toml), whether or not a usage server is running: without one, events
 # wait in the spool (72h / 1000 files) and the agent logs one warning.
-#   build: mise run build usage-agent      code: kube/components/usage/cluster-agent/docker/agent.py
+#   build: mise run build usage-client      code: docker/agent.py
 #   optional: ConfigMap kube-system/localdev-host (host facts, written by localdev's tasks). Without it
 #   the facts are "unknown"; cluster.updated backfills them when it appears.
 apiVersion: v1
 kind: ServiceAccount
 metadata:
-  name: usage-agent
+  name: usage-client
   namespace: kube-system
 ---
 # read-only: cluster identity, nodes, pod/namespace counts, the two localdev ConfigMaps, Deployments
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
-  name: usage-agent
+  name: usage-client
 rules:
   - apiGroups: [""]
     resources: [namespaces]
@@ -34,36 +34,36 @@ rules:
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
 metadata:
-  name: usage-agent
-roleRef: {apiGroup: rbac.authorization.k8s.io, kind: ClusterRole, name: usage-agent}
+  name: usage-client
+roleRef: {apiGroup: rbac.authorization.k8s.io, kind: ClusterRole, name: usage-client}
 subjects:
-  - {kind: ServiceAccount, name: usage-agent, namespace: kube-system}
+  - {kind: ServiceAccount, name: usage-client, namespace: kube-system}
 ---
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: usage-agent
+  name: usage-client
   namespace: kube-system
   # localdev/component + status-group: a row in cnav's infra group
-  labels: {app: usage-agent, localdev/component: usage-agent, localdev/status-group: infra}
+  labels: {app: usage-client, localdev/component: usage-client, localdev/status-group: infra}
 spec:
   replicas: 1
   strategy: {type: Recreate}
   selector:
-    matchLabels: {app: usage-agent}
+    matchLabels: {app: usage-client}
   template:
     metadata:
-      labels: {app: usage-agent}
+      labels: {app: usage-client}
     spec:
-      serviceAccountName: usage-agent
+      serviceAccountName: usage-client
       enableServiceLinks: false
       terminationGracePeriodSeconds: 10      # SIGTERM: one last flush, then exit
       containers:
-        - name: usage-agent
-          image: localdev-registry:5005/usage-agent:latest
+        - name: usage-client
+          image: localdev-registry:5005/usage-client:latest
           imagePullPolicy: Always
           env:
-            # where a usage server runs: the in-cluster one (usage component) for now; later a public endpoint
+            # where a usage server runs: the in-cluster one (usage-server component) for now; later a public endpoint
             - {name: USAGE_URL, value: "http://usage.usage.svc"}
           volumeMounts:
             - {name: spool, mountPath: /spool}

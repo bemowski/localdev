@@ -285,7 +285,7 @@ pgweb gets a bookmark for every database on the server automatically, within 30 
 ### A database init Job and a connection Secret
 
 For a service that should run unchanged in other environments, keep provisioning out of the
-Deployment. The usage server (`kube/components/usage/server/manifests/`) is the reference:
+Deployment. The usage server (`components/usage-server/manifests/`) is the reference:
 
 - **The Deployment reads one Secret**, `<name>-db-app`, with the keys of CloudNativePG's application
   secret: `host`, `port`, `dbname`, `username`, `password`, `uri`. It retries until the database
@@ -327,8 +327,8 @@ without it) and the Secret goes, and so does the datasource.
 ### Example: a Postgres datasource for your database
 
 The credentials stay in the [secret store](secrets.md): an **ExternalSecret** in `monitoring`
-renders the provisioning file into a Secret with the label. This is what the usage component does
-(`kube/components/usage/server/manifests/50-2-0-usage-secrets.yaml`).
+renders the provisioning file into a Secret with the label. This is what the usage-server component does
+(`components/usage-server/manifests/50-2-0-usage-secrets.yaml`).
 
 ```toml
 # your component's secrets.defaults.toml: a read-only login (dev value)

@@ -36,8 +36,9 @@ component. **Do not edit localdev's core to make one app work.**
 - `.mise.toml`, `profile.py`, `hostfacts.py`, `k3d.yaml`
 - `manifests/` (platform, infra, apps layers), `grafana/`, `registry/`
 - the built-in components: `components/{api-auth,cnav,docs,external-secrets,postgres,nats,keycloak,knative}/`
-- `secrets.defaults.toml`, and `profiles.toml`. Adding a *shared* in-repo component there is a
-  maintainer decision; propose it, don't just do it.
+- the in-repo application components (`components/{usage-server,usage-client}/`): they have owners
+- `secrets.defaults.toml`, `profiles.toml` and `application-profiles.toml`. Adding a *shared* in-repo
+  component there is a maintainer decision; propose it, don't just do it.
 
 **Yours to edit:**
 - your component folder: `manifests/`, `build.sh` or `docker/`, `dashboards/`, and its own
@@ -81,7 +82,7 @@ Run from `kube/localdev/`. For `kubectl`, use the cluster's kubeconfig:
 `KUBECONFIG=$PWD/.kubeconfig kubectl ...`.
 
 ```bash
-python3 profile.py check           # validate profiles.toml + local.toml (components, paths, layers)
+python3 profile.py check           # validate profiles.toml + application-profiles.toml + local.toml
 mise run cluster:profile           # list profiles; mise run cluster:profile <name> switches (adds/removes)
 mise run build <component>         # build + push the component's image, restart its pods
 mise run secrets:sync              # push secrets.store.toml / secrets.defaults.toml into the store

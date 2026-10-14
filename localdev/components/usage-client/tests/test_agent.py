@@ -1,4 +1,4 @@
-"""cluster-agent tests: stdlib unittest. The contract test (events vs ../../openapi.yaml) needs
+"""usage-client tests: stdlib unittest. The contract test (events vs the pinned API version, SPEC) needs
 jsonschema + pyyaml and is skipped without them (`mise run test` provides them)."""
 import json
 import sys
@@ -13,7 +13,7 @@ HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE.parent / "docker"))
 import agent  # noqa: E402
 
-SPEC = HERE.parents[1] / "openapi.yaml"
+SPEC = HERE.parents[1] / "usage-server" / "api" / "openapi-1.0.0.yaml"   # the API version this client targets
 CLUSTER_ID = "1a678a1e-7ac7-4534-9040-6717cc42f427"
 HOST = {"username": "alice", "cluster_type": "localdev", "cluster_role": "perftest", "platform": "k3d",
         "os": "windows", "os_variant": "wsl2", "os_version": "Ubuntu 24.04", "platform_version": "v5.9.0"}

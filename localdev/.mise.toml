@@ -22,7 +22,7 @@ LOCALDEV_GCP_PROJECT = "localdev-511501"     # DematicNonProd/localdev
 
 [tasks."cluster:create"]
 description = "Create the localdev k3d cluster with a profile (default: last used, else profiles.toml default)"
-usage = 'arg "[profile]" help="lite | dev | knative | auth | full (see profiles.toml)"'
+usage = 'arg "[profile]" help="lite | dev | knative | auth | full | usage (see profiles.toml, application-profiles.toml)"'
 run = """#!/bin/bash
 set -euo pipefail
 

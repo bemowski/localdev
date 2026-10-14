@@ -1,4 +1,4 @@
-# usage server. Build with ../build.sh, which stages ../../openapi.yaml into the context.
+# usage server. Build with ../build.sh, which stages ../openapi.yaml into the context.
 FROM python:3.13-alpine
 WORKDIR /app
 COPY requirements.txt .

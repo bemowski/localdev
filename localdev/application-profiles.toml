@@ -1,0 +1,12 @@
+# Application components and their profiles: same format as profiles.toml, merged over it (and under
+# your local.toml). profiles.toml is localdev's core; this file is for the applications developed with
+# it, in components/<name>/ or (with a `path`) in another project. No `default` here.
+#
+#   mise run cluster:profile usage      deploy the usage server (with Postgres)
+
+[components.usage-server]
+requires = ["postgres"]        # database `usage` on postgres/postgres
+layer = "apps"                 # http://api.localhost/usage; readme: components/usage-server/readme.md
+
+[profiles]
+usage = { description = "Postgres + docs + the usage server", components = ["postgres", "docs", "usage-server"] }

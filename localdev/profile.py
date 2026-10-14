@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
 """Cluster profiles for kube/localdev (driven by the cluster:* mise tasks).
 
-profiles.toml names which optional components (components/<name>/) a cluster runs. local.toml
-(gitignored, same format) adds a developer's own profiles and EXTERNAL components - folders in other
-projects: [components.<name>] path = "../../../myapp/localdev" (profiles.toml may declare shared external
-components the same way, e.g. the usage agent). This tool builds runtime.profile/, the
+profiles.toml names which optional components (components/<name>/) a cluster runs.
+application-profiles.toml (checked in, same format) adds the profiles and metadata of application
+components, kept apart from the core ones (e.g. usage-server). local.toml (gitignored, same format) adds
+a developer's own profiles and EXTERNAL components - folders in other projects:
+[components.<name>] path = "../../../myapp/localdev". This tool builds runtime.profile/, the
 "active view" the cluster reads - links, so edits to the real files stay live:
 
   runtime.profile/name          current profile
@@ -31,7 +32,7 @@ components the same way, e.g. the usage agent). This tool builds runtime.profile
   buildable             enabled components with an image to build (build.sh or docker/)
   dir <component>       the component's folder (components/<c>, or its local.toml path)
   workspace             the workspace mounted into the cluster (empty if none)
-  check                 validate profiles.toml and components/
+  check                 validate profiles.toml, application-profiles.toml, local.toml and components/
 """
 import functools
 import os
@@ -42,6 +43,7 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 CONFIG = HERE / "profiles.toml"
+APPS = HERE / "application-profiles.toml"   # checked in: application components' profiles and metadata
 LOCAL = HERE / "local.toml"            # per developer, gitignored: own profiles, external components
 COMPONENTS = HERE / "components"
 VIEW = HERE / "runtime.profile"
@@ -57,20 +59,23 @@ def die(msg):
 
 @functools.cache
 def config():
-    """profiles.toml, with local.toml merged over it (per profile / per component; `default`)."""
+    """profiles.toml, then application-profiles.toml and local.toml merged over it (per profile / per
+    component; `default` from local.toml only)."""
     cfg = tomllib.loads(CONFIG.read_text())
-    if LOCAL.exists():
-        local = tomllib.loads(LOCAL.read_text())
-        if "default" in local:
-            cfg["default"] = local["default"]
+    for f in (APPS, LOCAL):
+        if not f.exists():
+            continue
+        over = tomllib.loads(f.read_text())
+        if f == LOCAL and "default" in over:
+            cfg["default"] = over["default"]
         for table in ("profiles", "components"):
-            for key, value in local.get(table, {}).items():
+            for key, value in over.get(table, {}).items():
                 cfg.setdefault(table, {})[key] = {**cfg.get(table, {}).get(key, {}), **value}
     return cfg
 
 
 def external_path(c):
-    """The folder of an external component (local.toml `path`), or None."""
+    """The folder of an external component (a `path` in local.toml / *profiles.toml), or None."""
     p = config().get("components", {}).get(c, {}).get("path")
     if not p:
         return None
@@ -218,7 +223,7 @@ def cmd_list(_):
         print(f" {mark} {name:9} {p.get('description', '')}{dflt}\n             [{', '.join(comps) or 'no tools'}]")
     external = [c for c in components_on_disk() if external_path(c)]
     if external:
-        print("   external components (a path in profiles.toml / local.toml):")
+        print("   external components (a path in local.toml / *profiles.toml):")
         for c in external:
             print(f"     {c:12} {component_dir(c)}  ({'linked' if linkable(c) else 'copied: outside the workspace'})")
 

@@ -14,7 +14,7 @@ from fastapi.testclient import TestClient
 from usage_server.app import create_app
 from usage_server.store import Store
 
-ROOT = Path(__file__).resolve().parents[2]  # the usage/ folder: openapi.yaml, examples/
+ROOT = Path(__file__).resolve().parents[1]  # usage-server/: openapi.yaml, examples/
 SPEC = ROOT / "openapi.yaml"
 EXAMPLES = ROOT / "examples"
 ADMIN_URL = os.environ.get("USAGE_TEST_ADMIN_URL", "postgresql://app:localdev@localhost:5432/app")

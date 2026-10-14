@@ -1,8 +1,8 @@
-# usage server: write-only ingest of tool-usage events (../../openapi.yaml) into database `usage`
+# usage server: write-only ingest of tool-usage events (../openapi.yaml) into database `usage`
 # on postgres/postgres.
 #   desktop:     http://api.localhost/usage/v1/events     (the API host; open: no API key yet)
 #   in cluster:  http://usage.usage.svc/v1/events
-#   build:       mise run build usage   (server/build.sh)
+#   build:       mise run build usage-server   (build.sh)
 # The server only knows Secret usage-db-app (host, port, dbname, username, password): the contract
 # with whatever provisioned its database, here the Job in 50-2-1-usage-db-init.yaml, elsewhere e.g.
 # CloudNativePG. It retries until that database answers, then applies its own schema migrations.
@@ -17,7 +17,7 @@ metadata:
   name: usage
   namespace: usage
   # localdev/component: localdev's cnav lists this in its status column (group: apps)
-  labels: {app: usage, localdev/component: usage}
+  labels: {app: usage, localdev/component: usage-server}
 spec:
   replicas: 1
   selector:
@@ -30,7 +30,7 @@ spec:
       enableServiceLinks: false
       containers:
         - name: usage
-          image: localdev-registry:5005/usage:latest
+          image: localdev-registry:5005/usage-server:latest
           imagePullPolicy: Always
           env:
             - name: PGHOST
@@ -80,9 +80,9 @@ spec:
   stripPrefix:
     prefixes: [/usage]
 ---
-# On the API host (components/api-auth in kube/localdev): clients are tools, not browsers, so no SSO.
+# On the API host (components/api-auth): clients are tools, not browsers, so no SSO.
 # Open for now; to require API keys, put api-key@kubernetescrd first in the middlewares and add an
-# [api-usage] entry (api-key = "...") to server/secrets.defaults.toml.
+# [api-usage] entry (api-key = "...") to secrets.defaults.toml.
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:

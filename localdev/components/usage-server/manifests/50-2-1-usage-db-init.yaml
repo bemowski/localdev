@@ -11,7 +11,7 @@
 # It runs when k3s first applies this file, and again whenever the Job's spec here changes (k3s
 # replaces the Job: its pod template is immutable). k3s doesn't recreate it once deleted (by hand or
 # by the TTL), so to run it again (e.g. after a password change in the secret store):
-#   mise run server:db-init      (kube/components/usage)
+#   mise run db-init      (in components/usage-server)
 # The server retries its connection meanwhile, so the order Job/Deployment doesn't matter.
 apiVersion: v1
 kind: Namespace

@@ -1,4 +1,4 @@
-"""usage cluster-agent: watches a Kubernetes cluster and sends usage events to a usage server.
+"""usage-client: watches a Kubernetes cluster and sends usage events to a usage server.
 
 Stdlib only. Runs as one pod in kube-system. Events (see ../../openapi.yaml):
   cluster.created                        once per cluster (type, role, platform, versions, ...)
@@ -52,7 +52,7 @@ ADDON_LABEL = "objectset.rio.cattle.io/hash"   # k3s puts it on everything local
 SYSTEM_NAMESPACES = {"kube-system", "kube-public", "kube-node-lease"}
 MAX_BATCH = 500                                 # the API's limit
 
-log = logging.getLogger("usage-agent")
+log = logging.getLogger("usage-client")
 
 
 # --- config and logging -------------------------------------------------------
@@ -75,7 +75,7 @@ class Config:
 
 
 class LogfmtFormatter(logging.Formatter):
-    """One logfmt line per record (ts=... level=info logger=usage-agent msg="...")."""
+    """One logfmt line per record (ts=... level=info logger=usage-client msg="...")."""
 
     def format(self, record):
         line = (f"ts={datetime.fromtimestamp(record.created, timezone.utc).isoformat(timespec='milliseconds')} "
@@ -468,7 +468,7 @@ class Agent:
             self.next_heartbeat = self.clock() + self.cfg.heartbeat_s
 
     def run(self, stop: threading.Event):
-        log.info(f"usage-agent {VERSION}: server {self.cfg.usage_url}, spool {self.cfg.spool_dir}, "
+        log.info(f"usage-client {VERSION}: server {self.cfg.usage_url}, spool {self.cfg.spool_dir}, "
                  f"poll {self.cfg.poll_s}s, flush {self.cfg.flush_s}s, heartbeat {self.cfg.heartbeat_s}s")
         next_poll = next_flush = 0.0
         while not stop.is_set():

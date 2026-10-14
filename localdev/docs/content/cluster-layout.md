@@ -17,7 +17,8 @@ manifests/<layer>/     always-on manifests (10-platform, 20-infra, 50-apps)
 components/<name>/     one component (see Components)
 grafana/dashboards/    always-on Grafana dashboards
 docs/                  these docs (markdown)
-profiles.toml          profiles: which components run
+profiles.toml          profiles: which components run (core)
+application-profiles.toml  application components' profiles and metadata (e.g. usage)
 runtime.profile/       generated view of the active profile
 runtime.data/          persistent data (postgres, nats, metrics, logs, traces, grafana, registry)
 ```

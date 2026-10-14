@@ -1,7 +1,7 @@
 """Facts about this localdev cluster that pods can't see: who, which OS, which k3d, which role.
 
 Prints key=value lines for `kubectl create configmap --from-env-file`; cluster:profile:sync
-publishes them as ConfigMap kube-system/localdev-host (read by e.g. the usage cluster-agent).
+publishes them as ConfigMap kube-system/localdev-host (read by e.g. usage-client).
 
   username          login name ($USER)
   cluster_type      localdev

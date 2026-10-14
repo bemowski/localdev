@@ -1,34 +1,44 @@
-# usage
+# usage-server
 
 Tracks how people use internal tools. **Clients** built into tools send **events** to a small
 **write-only HTTP API**, a **server** stores them in Postgres, and Grafana dashboards aggregate them.
 The first tool tracked is localdev itself: clusters created and destroyed, plus ad-hoc events
 attached to a cluster (app deployed, test suite run, ...).
 
-This folder is self-contained, with its own `.mise.toml`. `client/` and `server/` are independent and
-coupled only by `openapi.yaml`. It lives in `kube/components/usage/`, outside localdev, and is plugged
-into a localdev cluster only while you work on it (see Server → deploy).
+Two localdev components, coupled only by the API: **usage-server** (this folder: the contract and the
+ingest server) and **usage-client** (`../usage-client`: the in-cluster event emitter). The client
+reads the API from here, pinned to a frozen version in `api/`. Each has its own `.mise.toml`.
 
 ```
-openapi.yaml       the contract (OpenAPI 3.1)
+openapi.yaml       the contract (OpenAPI 3.1): the version you edit
+api/               frozen versions, openapi-<info.version>.yaml (checked in; clients pin one)
 examples/          request bodies: *.json valid, invalid/*.json must be rejected
-scripts/           check_examples.py (validates examples against the spec)
+scripts/           check_examples.py (examples + frozen versions), api_versions.py (freeze)
 redocly.yaml       lint rules
-server/            ingest server, a complete component: manifests/, docker/, build.sh, own .mise.toml
-cluster-agent/     in-cluster event emitter: stdlib Python pod in kube-system (infra component)
-client/            host-side CLI + local spool, stdlib Python   (later)
+manifests/ docker/ build.sh VERSION secrets.defaults.toml tests/     the server component
+../usage-client/   in-cluster event emitter: stdlib Python pod in kube-system (infra component)
 ```
 
 ## Tasks
 
 ```bash
 mise run api:lint     # Redocly lint
-mise run api:check    # examples/ and the spec's inline examples vs. the schemas
+mise run api:check    # examples/ and the spec's inline examples vs. the schemas; frozen versions unchanged
 mise run api:docs     # build/api.html
 mise run api:test     # lint + check
+mise run api:freeze   # copy openapi.yaml to api/openapi-<info.version>.yaml
 ```
 
 `mise install` provides node (for Redocly) and uv (for the checker).
+
+## API versions (`api/`)
+
+`openapi.yaml` is the spec you edit; `info.version` is its version. `mise run api:freeze` copies it to
+`api/openapi-<version>.yaml`, which is committed and never changes again: `api:check` fails when
+`openapi.yaml` differs from the frozen file of the same version, so a changed spec needs a new
+`info.version` (then a new freeze). `mise run release` requires the current version to be frozen.
+Clients pin a frozen file: usage-client's contract test reads `api/openapi-1.0.0.yaml`, and moving
+it to a newer version is a deliberate change in the client.
 
 ## API at a glance
 
@@ -62,7 +72,7 @@ Cluster facts are sent in `cluster.created`. Facts the sender doesn't know yet a
 role, username) or left out (optional ones), and `cluster.updated` fills them in later. The other
 cluster events only carry `cluster_id`.
 
-## Server (`server/`)
+## Server
 
 FastAPI + psycopg. Requests are validated against `openapi.yaml` itself (jsonschema), so the server
 can't drift from the spec. Each batch is written in one transaction:
@@ -77,16 +87,15 @@ can't drift from the spec. Each batch is written in one transaction:
 
 | | |
 |---|---|
-| deploy | only while working on it, via your gitignored `kube/localdev/local.toml` (below), then `mise run cluster:profile usage`. `mise run build usage` rebuilds |
+| deploy | the `usage` profile (`application-profiles.toml`, below): `mise run cluster:profile usage`. `mise run build usage-server` rebuilds |
 | URLs | `http://api.localhost/usage`, also `http://localhost/api/usage` (localdev's API host, prefix stripped; open, no API key yet), `http://usage.usage.svc` |
-| database | `usage` on `postgres/postgres`. The server only reads Secret `usage-db-app` (`host`, `port`, `dbname`, `username`, `password`, `uri`: the keys of CloudNativePG's `<cluster>-app` secret) and runs `usage_server/migrations/*.sql` at startup. Provisioning is a separate Job, `usage-db-init` (`manifests/50-2-1-usage-db-init.yaml`): as the Postgres admin (Secret `usage-db-admin`, which only the Job reads) it creates roles `usage` (owner) and `usage_ro` (read-only, Grafana) and the database, from the secret store (`server/secrets.defaults.toml`). Idempotent; `mise run server:db-init` re-runs it. With CloudNativePG, that file is replaced (e.g. a Cluster `usage-db`, whose secret is `usage-db-app`) and the Deployment stays as is |
+| database | `usage` on `postgres/postgres`. The server only reads Secret `usage-db-app` (`host`, `port`, `dbname`, `username`, `password`, `uri`: the keys of CloudNativePG's `<cluster>-app` secret) and runs `usage_server/migrations/*.sql` at startup. Provisioning is a separate Job, `usage-db-init` (`manifests/50-2-1-usage-db-init.yaml`): as the Postgres admin (Secret `usage-db-admin`, which only the Job reads) it creates roles `usage` (owner) and `usage_ro` (read-only, Grafana) and the database, from the secret store (`secrets.defaults.toml`). Idempotent; `mise run db-init` re-runs it. With CloudNativePG, that file is replaced (e.g. a Cluster `usage-db`, whose secret is `usage-db-app`) and the Deployment stays as is |
 | Grafana | datasource **Usage** (uid `usage-pg`, read-only), provisioned through an ExternalSecret in `monitoring` |
 | metrics | `usage_events_total{type,result}`, `usage_batches_total{status}` on port `metrics` (9090) |
 | logs | logfmt, one line per batch |
-| image | `us-central1-docker.pkg.dev/scs-d-common-nonprod/docker-registry/tools/cluster/usage/server:<VERSION>`, version in `server/VERSION`. `mise run release` builds linux/amd64, pushes it and tags git `usage-server-v<VERSION>`; it refuses a dirty tree or a version already pushed. Shared clusters deploy it from argo-app-of-apps (`cluster-workloads/usage`) |
+| image | `us-central1-docker.pkg.dev/scs-d-common-nonprod/docker-registry/tools/cluster/usage/server:<VERSION>`, version in `VERSION`. `mise run release` builds linux/amd64, pushes it and tags git `usage-server-v<VERSION>`; it refuses a dirty tree, an API version not frozen in `api/`, or a version already pushed. Shared clusters deploy it from argo-app-of-apps (`cluster-workloads/usage`) |
 
 ```bash
-cd server
 mise run test     # validation tests + API tests on a throwaway DB (localdev Postgres; skipped if absent)
 mise run dev      # run locally on :8080 against localdev's `usage` database
 mise run db-init  # re-run the database init Job in localdev (idempotent; e.g. after a password change)
@@ -94,30 +103,20 @@ mise run image    # docker build (standalone: IMAGE=usage-server:dev)
 mise run release  # bump VERSION and commit first; builds, pushes and tags (gcloud auth configure-docker us-central1-docker.pkg.dev)
 ```
 
-`server/` layout: `manifests/` (applied by k3s), `docker/` (Dockerfile, requirements, `usage_server/`
-code and migrations), `build.sh` (stages `docker/` + `../openapi.yaml` as the build context),
+Server layout: `manifests/` (applied by k3s), `docker/` (Dockerfile, requirements, `usage_server/`
+code and migrations), `build.sh` (stages `docker/` + `openapi.yaml` as the build context),
 `secrets.defaults.toml` (secret-store entries), `tests/`.
 
-**Plugging it into localdev.** Add to `kube/localdev/local.toml` (gitignored, so only clusters you
-create while working on usage get it):
+**In localdev.** `application-profiles.toml` (checked in, next to `profiles.toml`) registers the
+component (`requires = ["postgres"]`, `layer = "apps"`) and the `usage` profile (postgres, docs,
+usage-server). `mise run cluster:profile usage` (or `cluster:create usage`) deploys it;
+`mise run cluster:profile dev` removes it.
 
-```toml
-[components.usage]
-path = "../components/usage/server"
-requires = ["postgres"]
-layer = "apps"
-
-[profiles]
-usage = { description = "Postgres + docs + the usage server", components = ["postgres", "docs", "usage"] }
-```
-
-Then `mise run cluster:profile usage` (or `cluster:create usage`). `mise run cluster:profile dev` removes it.
-
-## Cluster agent (`cluster-agent/`)
+## Client (`../usage-client/`)
 
 One stdlib-only Python pod (`docker/agent.py`) in `kube-system` that watches the cluster and sends
 events to `USAGE_URL` (default `http://usage.usage.svc`, set in the manifest). It's a localdev
-**infra** component named `usage-agent` (`manifests/20-10-usage-agent.yaml`).
+**infra** component named `usage-client` (`manifests/20-10-usage-client.yaml`).
 
 | event | when |
 |---|---|
@@ -129,7 +128,7 @@ events to `USAGE_URL` (default `http://usage.usage.svc`, set in the manifest). I
 
 - **Cluster facts:**
   - On localdev: from ConfigMap `kube-system/localdev-host`, which localdev's `cluster:create` /
-    `cluster:profile` write (`kube/localdev/hostfacts.py`). It holds username, `cluster_type`,
+    `cluster:profile` write (`hostfacts.py`). It holds username, `cluster_type`,
     `cluster_role` (set with `[cluster] role = "..."` in `local.toml`, default dev), host OS and k3d
     version. Profile and components come from `cnav/localdev-profile`.
   - On other clusters: `CLUSTER_TYPE`, `CLUSTER_ROLE`, `CLUSTER_USERNAME` and `CLUSTER_PLATFORM` env.
@@ -144,21 +143,22 @@ events to `USAGE_URL` (default `http://usage.usage.svc`, set in the manifest). I
   - The spool is capped at 1000 files and 3 days.
 - **Restarts are harmless:** created and app events have ids derived from the cluster id (uuid5), so
   a restarted agent resends them and the server counts them as duplicates.
-- **Deploy:** always on in every localdev cluster: `kube/localdev/profiles.toml` declares
-  `[components.usage-agent]` (`path`, `layer = "infra"`, `always = true`). With no usage server it
+- **Deploy:** always on in every localdev cluster: `profiles.toml` declares
+  `[components.usage-client]` (`layer = "infra"`, `always = true`). With no usage server it
   spools (and logs one warning). `USAGE_URL` in the manifest points at the in-cluster server for now;
-  a public endpoint later. `mise run build usage-agent` rebuilds it. For other clusters, a Helm chart
+  a public endpoint later. `mise run build usage-client` rebuilds it. For other clusters, a Helm chart
   (published to an OCI registry) is the planned next step.
-- **Tests:** `cd cluster-agent && mise run test` (unittest, plus a contract test of every event against `openapi.yaml`).
+- **Tests:** `cd ../usage-client && mise run test` (unittest, plus a contract test of every event against the pinned `api/openapi-<version>.yaml`).
 
 ## Adding an event type
 
 1. Add a schema to `openapi.yaml` (copy one of the `Localdev*` schemas: `allOf` envelope plus
    `type` const plus `data`, `unevaluatedProperties: false`). Add it to `Event.oneOf` and the
    discriminator `mapping`.
-2. Add `examples/<name>.json`, and an invalid one if it has rules worth pinning. Then run `mise run api:test`.
+2. Add `examples/<name>.json`, and an invalid one if it has rules worth pinning. Bump `info.version`
+   (minor, for an additive change), run `mise run api:test`, then `mise run api:freeze`.
 3. Server: nothing is required, since it's stored in `events` as soon as the spec has it. For a typed
-   table, add a migration (`server/usage_server/migrations/NNN_*.sql`) and a handler in `store.py`'s `HANDLERS`.
-   Client: add an `emit` helper if needed.
+   table, add a migration (`docker/usage_server/migrations/NNN_*.sql`) and a handler in `store.py`'s `HANDLERS`.
+   Client: add an `emit` helper if needed, and move its pinned version (`SPEC` in `tests/test_agent.py`).
 
 Removing or renaming a field, or making one required, is breaking: use a new type name (`….v2`).

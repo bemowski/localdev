@@ -1,0 +1,18 @@
+# usage-client: stdlib-only Python pod (kube-system) that sends localdev events to a usage server.
+# A localdev component (manifests/, docker/); see ../usage-server/readme.md. The API it targets is a
+# frozen version from usage-server: ../usage-server/api/openapi-<version>.yaml (SPEC in tests/test_agent.py).
+#   mise run test    unit tests + contract test (events vs that API version)
+#   mise run image   build the image (IMAGE=usage-client:dev); in localdev: `mise run build usage-client`
+
+[tools]
+uv = '0.12.24'
+
+[tasks.test]
+description = "Run the client tests (stdlib unittest; jsonschema only for the contract test)"
+dir = "{{config_root}}"
+run = "uv run --no-project --python 3.13 --with jsonschema==4.26.0 --with rfc3339-validator==0.1.4 --with pyyaml==6.0.3 python -m unittest discover -s tests -v"
+
+[tasks.image]
+description = "Build the client image"
+dir = "{{config_root}}"
+run = 'docker build -t "${IMAGE:-usage-client:dev}" docker'

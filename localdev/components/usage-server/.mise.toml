@@ -1,0 +1,96 @@
+# usage-server: tool-usage events. The API contract (openapi.yaml, frozen versions in api/) and its
+# ingest server, a localdev component (manifests/, docker/, build.sh). FastAPI + psycopg; validates
+# requests against openapi.yaml and writes Postgres. usage-client (../usage-client) pins an api/ version.
+#   mise run api:lint     lint openapi.yaml (Redocly)
+#   mise run api:check    validate examples/ and the spec's inline examples against the schemas; frozen versions unchanged
+#   mise run api:docs     render the spec to build/api.html
+#   mise run api:test     lint + check
+#   mise run api:freeze   copy openapi.yaml to api/openapi-<info.version>.yaml (commit it)
+#   mise run test    unit tests + API tests (API tests need Postgres: USAGE_TEST_ADMIN_URL,
+#                    default localdev's postgresql://app:localdev@localhost:5432/app; skipped if unreachable)
+#   mise run dev     run locally on :8080 against localdev's Postgres (database `usage`, created in-cluster)
+#   mise run image   build the image (IMAGE=usage-server:dev); in localdev: `mise run build usage-server`
+#   mise run db-init re-run the database init Job in localdev (after a password change; idempotent)
+#   mise run release build linux/amd64, push $USAGE_REPO:<VERSION>, tag git usage-server-v<VERSION>. Needs a
+#                    clean tree, an unused VERSION, the API version frozen, and
+#                    `gcloud auth configure-docker us-central1-docker.pkg.dev`
+
+[tools]
+node = '22.23.2'   # npx @redocly/cli
+uv = '0.12.24'     # uvx/uv run for the example checker (jsonschema) and the server
+
+[env]
+REDOCLY_VERSION = "2.54.2"
+REDOCLY_TELEMETRY = "off"
+REDOCLY_SUPPRESS_UPDATE_NOTICE = "true"
+USAGE_REPO = "us-central1-docker.pkg.dev/scs-d-common-nonprod/docker-registry/tools/cluster/usage/server"
+_UV_RUN = "uv run --no-project --python 3.13 --with-requirements docker/requirements.txt"
+
+[tasks."api:lint"]
+description = "Lint openapi.yaml"
+dir = "{{config_root}}"
+run = 'npx -y "@redocly/cli@$REDOCLY_VERSION" lint openapi.yaml'
+
+[tasks."api:check"]
+description = "Validate examples/ (valid and invalid), inline spec examples and the frozen versions in api/"
+dir = "{{config_root}}"
+run = "uv run --no-project --python 3.12 --with 'jsonschema[format]==4.26.0' --with pyyaml==6.0.3 python scripts/check_examples.py"
+
+[tasks."api:docs"]
+description = "Render the spec to build/api.html"
+dir = "{{config_root}}"
+run = 'npx -y "@redocly/cli@$REDOCLY_VERSION" build-docs openapi.yaml -o build/api.html && echo "file://{{config_root}}/build/api.html"'
+
+[tasks."api:test"]
+description = "Lint the spec and check the examples"
+depends = ["api:lint", "api:check"]
+
+[tasks."api:freeze"]
+description = "Copy openapi.yaml to api/openapi-<info.version>.yaml (refuses to change a frozen version)"
+dir = "{{config_root}}"
+run = "uv run --no-project --python 3.12 --with pyyaml==6.0.3 python scripts/api_versions.py freeze"
+
+[tasks.test]
+description = "Run the server tests"
+dir = "{{config_root}}"
+run = "$_UV_RUN --with-requirements requirements-dev.txt pytest -q"
+
+[tasks.dev]
+description = "Run the server locally against localdev's Postgres"
+dir = "{{config_root}}/docker"
+env = { PGHOST = "localhost", PGPORT = "5432", PGDATABASE = "usage", PGUSER = "usage", PGPASSWORD = "usage", USAGE_METRICS_PORT = "9091", USAGE_SPEC = "{{config_root}}/openapi.yaml" }
+run = "uv run --no-project --python 3.13 --with-requirements requirements.txt python -m usage_server"
+
+[tasks.image]
+description = "Build the server image"
+dir = "{{config_root}}"
+run = "./build.sh"
+
+[tasks.db-init]
+description = "Re-run the database init Job in localdev (manifests/50-2-1-usage-db-init.yaml)"
+dir = "{{config_root}}"
+run = """
+export KUBECONFIG="${KUBECONFIG:-{{config_root}}/../../.kubeconfig}"
+kubectl -n usage delete job usage-db-init --ignore-not-found
+kubectl apply -f manifests/50-2-1-usage-db-init.yaml
+kubectl -n usage wait --for=condition=complete job/usage-db-init --timeout=180s
+kubectl -n usage logs job/usage-db-init --tail=3
+"""
+
+[tasks.release]
+description = "Build and push the server image for VERSION, then tag git"
+dir = "{{config_root}}"
+run = """#!/bin/bash
+set -euo pipefail
+ver="$(tr -d '[:space:]' < VERSION)"
+image="$USAGE_REPO:$ver"
+tag="usage-server-v$ver"
+if [ -n "$(git status --porcelain -- .)" ]; then echo "uncommitted changes under components/usage-server: commit first" >&2; exit 1; fi
+uv run --no-project --python 3.12 --with pyyaml==6.0.3 python scripts/api_versions.py released
+if git rev-parse -q --verify "refs/tags/$tag" >/dev/null; then echo "git tag $tag exists: bump VERSION" >&2; exit 1; fi
+if docker manifest inspect "$image" >/dev/null 2>&1; then echo "$image already pushed: bump VERSION" >&2; exit 1; fi
+IMAGE="$image" PLATFORM=linux/amd64 ./build.sh
+docker push "$image"
+git tag -a "$tag" -m "usage server $ver ($image)"
+echo "pushed $image, tagged $tag (share it: git push origin $tag)"
+"""

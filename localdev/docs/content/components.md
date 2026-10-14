@@ -9,12 +9,13 @@ one folder, `components/<name>/` in this repo, or a folder in your own project r
 | cnav | cluster navigator at `/` | all (always on, infra layer) |
 | api-auth | the API host `http://api.localhost/<name>/`: API-key check for keyed APIs, 404 for unknown paths (`components/api-auth/readme.md`) | all (always on, infra layer) |
 | external-secrets | External Secrets Operator, Reloader, the `localdev` secret store | all (always on, infra layer) |
-| usage-agent | sends this cluster's usage events (created, heartbeat, profile changed, app deployed) to a usage server; spools when there's none. External: `kube/components/usage/cluster-agent` | all (always on, infra layer) |
+| usage-client | sends this cluster's usage events (created, heartbeat, profile changed, app deployed) to a usage server; spools when there's none | all (always on, infra layer) |
 | postgres | Postgres + pgweb (`/pgweb`) | dev, knative, full |
 | nats | NATS + JetStream, NUI (`/nats`) | dev, knative, full |
 | docs | these docs (`/docs`) | dev, knative, full |
 | knative | Knative Serving + Eventing | knative, full |
 | keycloak | Keycloak identity provider (`/keycloak`) | full |
+| usage-server | usage events API + Postgres ingest (`http://api.localhost/usage`; `components/usage-server/readme.md`) | usage (`application-profiles.toml`) |
 
 ## Anatomy
 
@@ -37,9 +38,11 @@ components/<name>/
   multi-stage Dockerfile then renders the markdown with MkDocs and serves the result with nginx.
 - `cluster:create` builds every enabled component that has an image; `cluster:profile` builds the ones it adds.
 
-## Metadata (`profiles.toml`)
+## Metadata (`profiles.toml`, `application-profiles.toml`)
 
-Optional, under `[components.<name>]`:
+Optional, under `[components.<name>]`. `profiles.toml` holds localdev's core components and profiles;
+`application-profiles.toml` (same format, checked in, merged over it) holds the applications developed
+with localdev and their profiles (e.g. usage-server and the `usage` profile). Your `local.toml` is merged last.
 
 - `requires = [...]`: other components it needs, added automatically (keycloak requires postgres).
 - `layer = "..."`: where its manifests deploy: `platform`, `infra`, `tools` (default) or `apps`.

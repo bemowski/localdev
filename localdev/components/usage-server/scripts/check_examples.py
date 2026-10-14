@@ -3,6 +3,7 @@
   examples/*.json          must be valid EventBatch bodies
   examples/invalid/*.json  must be rejected
   inline examples in the spec (request bodies and responses) must match their schemas
+  frozen versions (api/, see api_versions.py) must match openapi.yaml at the same version
 
 Run: mise run api:check
 """
@@ -11,6 +12,7 @@ import sys
 from pathlib import Path
 
 import yaml
+from api_versions import problems as version_problems
 from jsonschema import Draft202012Validator
 from referencing import Registry
 from referencing.jsonschema import DRAFT202012
@@ -92,6 +94,11 @@ for path, ops in spec["paths"].items():
                 print(f"{'ok' if not errs else 'FAIL':4}  inline   {method.upper()} {path} {where} {name}")
                 for e in errs:
                     print(f"        {e}")
+
+# frozen API versions
+for problem in version_problems() or [None]:
+    failures += problem is not None
+    print(f"{'ok' if problem is None else 'FAIL':4}  api/     {problem or 'frozen versions match openapi.yaml'}")
 
 print(f"\n{failures} failure(s)" if failures else "\nall checks passed")
 sys.exit(1 if failures else 0)

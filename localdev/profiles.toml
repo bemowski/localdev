@@ -4,6 +4,7 @@
 #   components/<name>/docker/       image built by `mise run build <name>` (optional)
 #   components/<name>/build.sh      custom image build, used instead of docker/ (optional)
 # platform, infra and apps (manifests/, grafana/dashboards/) are always deployed.
+# application-profiles.toml (checked in, same format) adds application components and their profiles.
 # local.toml (gitignored, same format) adds your own profiles, a `default`, and EXTERNAL components
 # living in other projects: [components.myapp] path = "../../../myapp/localdev" (see the docs).
 #
@@ -32,10 +33,9 @@ requires = ["postgres"]
 layer = "infra"                # deploy with infra, before the tools
 always = true
 
-[components.usage-agent]
-path = "../components/usage/cluster-agent"   # external: lives with the usage project (kube/components/usage)
-layer = "infra"                              # kube-system; sends this cluster's usage events
-always = true                                # every profile, with or without a usage server (it spools)
+[components.usage-client]
+layer = "infra"                # kube-system; sends this cluster's usage events (API: usage-server)
+always = true                  # every profile, with or without a usage server (it spools)
 
 [components.api-auth]
 layer = "infra"                # http://api.localhost/<api>/: API-key check + catch-all (readme.md)
