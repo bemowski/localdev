@@ -1,0 +1,382 @@
+{
+  "uid": "usage-clusters",
+  "title": "Usage: clusters",
+  "tags": [
+    "localdev",
+    "usage"
+  ],
+  "description": "Clusters active in the time range (any event, default: today), newest first, with their last heartbeat. Click a cluster to list its events below.",
+  "editable": true,
+  "schemaVersion": 39,
+  "refresh": "1m",
+  "id": null,
+  "time": {
+    "from": "now/d",
+    "to": "now"
+  },
+  "timezone": "browser",
+  "templating": {
+    "list": [
+      {
+        "name": "cluster",
+        "label": "Cluster",
+        "type": "query",
+        "datasource": {
+          "type": "grafana-postgresql-datasource",
+          "uid": "usage-pg"
+        },
+        "query": "SELECT cluster_id::text AS __value, username || ' · ' || coalesce(profile, '-') || ' · ' || to_char(created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI') || ' UTC · ' || left(cluster_id::text, 8) AS __text\nFROM clusters\nWHERE last_seen_at >= $__timeFrom() AND coalesce(created_at, last_seen_at) <= $__timeTo()\nORDER BY created_at DESC NULLS LAST",
+        "refresh": 2,
+        "sort": 0,
+        "includeAll": false,
+        "multi": false,
+        "hide": 0
+      },
+      {
+        "name": "heartbeats",
+        "label": "Heartbeat events",
+        "type": "custom",
+        "query": "hide,show",
+        "current": {
+          "text": "hide",
+          "value": "hide"
+        },
+        "options": [
+          {
+            "text": "hide",
+            "value": "hide",
+            "selected": true
+          },
+          {
+            "text": "show",
+            "value": "show",
+            "selected": false
+          }
+        ],
+        "includeAll": false,
+        "multi": false,
+        "hide": 0
+      }
+    ]
+  },
+  "panels": [
+    {
+      "id": 1,
+      "type": "table",
+      "title": "Active clusters",
+      "description": "Clusters with any event in the time range, newest first. Status: destroyed (cluster.destroyed received), silent (nothing for 16 minutes, row greyed), live. Click a row to show that cluster's events below.",
+      "gridPos": {
+        "h": 9,
+        "w": 24,
+        "x": 0,
+        "y": 0
+      },
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "usage-pg"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "usage-pg"
+          },
+          "editorMode": "code",
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT c.created_at AS \"created\",\n       c.username AS \"user\",\n       c.cluster_type AS \"type\",\n       c.cluster_role AS \"role\",\n       c.profile,\n       c.platform || ' ' || coalesce(c.platform_version, '') AS \"platform\",\n       c.kubernetes_version AS \"kubernetes\",\n       CASE WHEN c.destroyed_at IS NOT NULL THEN 'destroyed'\n            WHEN c.last_seen_at < now() - interval '16 minutes' THEN 'silent'\n            ELSE 'live' END AS \"status\",\n       hb.occurred_at AS \"last heartbeat\",\n       hb.nodes, hb.cores, hb.memory_bytes AS \"memory\", hb.pods, hb.namespaces,\n       c.destroyed_at AS \"destroyed\",\n       c.cluster_id::text AS \"cluster_id\"\nFROM clusters c\nLEFT JOIN LATERAL (\n  SELECT * FROM cluster_heartbeats h\n  WHERE h.cluster_id = c.cluster_id\n  ORDER BY h.occurred_at DESC LIMIT 1\n) hb ON true\nWHERE c.last_seen_at >= $__timeFrom() AND coalesce(c.created_at, c.last_seen_at) <= $__timeTo()\nORDER BY c.created_at DESC NULLS LAST"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "align": "auto",
+            "cellOptions": {
+              "type": "auto"
+            },
+            "inspect": false
+          },
+          "links": [
+            {
+              "title": "Show events for this cluster",
+              "url": "/d/usage-clusters/usage-clusters?var-cluster=${__data.fields.cluster_id}&var-heartbeats=${heartbeats}&${__url_time_range}"
+            }
+          ]
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "created"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "dateTimeAsIso"
+              },
+              {
+                "id": "custom.width",
+                "value": 180
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "last heartbeat"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "dateTimeFromNow"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "destroyed"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "dateTimeAsIso"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "memory"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "bytes"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "status"
+            },
+            "properties": [
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "color-background",
+                  "mode": "basic",
+                  "applyToRow": true
+                }
+              },
+              {
+                "id": "mappings",
+                "value": [
+                  {
+                    "type": "value",
+                    "options": {
+                      "live": {
+                        "color": "transparent",
+                        "index": 0
+                      },
+                      "silent": {
+                        "color": "rgba(128, 128, 128, 0.18)",
+                        "index": 1
+                      },
+                      "destroyed": {
+                        "color": "transparent",
+                        "index": 2
+                      }
+                    }
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "cluster_id"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "cluster id"
+              },
+              {
+                "id": "custom.width",
+                "value": 300
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "showHeader": true,
+        "cellHeight": "sm",
+        "footer": {
+          "show": false,
+          "reducer": [
+            "sum"
+          ],
+          "fields": ""
+        }
+      }
+    },
+    {
+      "id": 2,
+      "type": "table",
+      "title": "Events: ${cluster:text}",
+      "description": "Every event received for the selected cluster, newest first (heartbeats hidden unless the Heartbeat events variable is 'show'). Pick a cluster by clicking it above or with the Cluster variable.",
+      "gridPos": {
+        "h": 14,
+        "w": 24,
+        "x": 0,
+        "y": 9
+      },
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "usage-pg"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "usage-pg"
+          },
+          "editorMode": "code",
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT e.occurred_at AS \"occurred\",\n       e.type,\n       ce.name,\n       ce.outcome,\n       ce.duration_ms AS \"duration\",\n       e.username AS \"user\",\n       e.source_name || ' ' || e.source_version AS \"source\",\n       coalesce(ce.attributes, e.data - 'cluster_id')::text AS \"details\",\n       e.received_at AS \"received\"\nFROM events e\nLEFT JOIN cluster_events ce USING (event_id)\nWHERE e.data->>'cluster_id' = '${cluster}'\n  AND ('${heartbeats}' = 'show' OR e.type <> 'cluster.heartbeat')\nORDER BY e.occurred_at DESC\nLIMIT 1000"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "align": "auto",
+            "cellOptions": {
+              "type": "auto"
+            },
+            "inspect": true
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "occurred"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "dateTimeAsIso"
+              },
+              {
+                "id": "custom.width",
+                "value": 180
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "received"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "dateTimeAsIso"
+              },
+              {
+                "id": "custom.width",
+                "value": 180
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "duration"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "ms"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "type"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 150
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "outcome"
+            },
+            "properties": [
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "color-text"
+                }
+              },
+              {
+                "id": "mappings",
+                "value": [
+                  {
+                    "type": "value",
+                    "options": {
+                      "success": {
+                        "color": "green",
+                        "index": 0
+                      },
+                      "failure": {
+                        "color": "red",
+                        "index": 1
+                      }
+                    }
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "details"
+            },
+            "properties": [
+              {
+                "id": "custom.minWidth",
+                "value": 400
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "showHeader": true,
+        "cellHeight": "sm",
+        "footer": {
+          "show": false,
+          "reducer": [
+            "sum"
+          ],
+          "fields": ""
+        }
+      }
+    }
+  ]
+}
