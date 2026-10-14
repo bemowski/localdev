@@ -16,7 +16,7 @@ examples/          request bodies: *.json valid, invalid/*.json must be rejected
 scripts/           check_examples.py (examples + frozen versions), api_versions.py (freeze)
 redocly.yaml       lint rules
 manifests/ docker/ build.sh VERSION tests/     the server component
-../usage-client/   in-cluster event emitter: stdlib Python pod in kube-system (infra component)
+../usage-client/   in-cluster event emitter: stdlib Python pod in ns usage-client (infra component; chart/ for other clusters)
 ```
 
 ## Tasks
@@ -113,7 +113,7 @@ usage-server; the component includes usage-client-local, a client feeding this s
 
 ## Client (`../usage-client/`)
 
-One stdlib-only Python pod (`docker/agent.py`) in `kube-system` that watches the cluster and sends
+One stdlib-only Python pod (`docker/agent.py`) in namespace `usage-client` that watches the cluster and sends
 events to `USAGE_URL`, set in the manifest: the shared server, `https://api.stage.ops.dematic.dev/usage`
 today (prod later). It's a localdev **infra** component named `usage-client` (`manifests/20-10-usage-client.yaml`).
 
@@ -151,9 +151,47 @@ cluster id, so neither depends on the other. `USAGE_URL` in each manifest is the
 - **Deploy:** always on in every localdev cluster: `profiles.toml` declares
   `[components.usage-client]` (`layer = "infra"`, `always = true`). With no usage server it
   spools (and logs one warning), e.g. off the internal network. `mise run build usage-client` rebuilds
-  it, and restarts usage-client-local too (label `app=usage-client`). For other clusters, a Helm chart
-  (published to an OCI registry) is the planned next step.
-- **Tests:** `cd ../usage-client && mise run test` (unittest, plus a contract test of every event against the pinned `api/openapi-<version>.yaml`).
+  it, and restarts usage-client-local too (label `app=usage-client`).
+- **Platform:** `CLUSTER_PLATFORM`, else the first node's `providerID` (`kind://`, `gce://` gke,
+  `aws://` eks, `azure://` aks), else the kubelet version (`+k3s`, `+rke2`), else `kubernetes`.
+  localdev's ConfigMap says `k3d`.
+- **App events on other clusters:** namespaces matching `IGNORE_NAMESPACES` (default
+  `kube-*`, `*-system`, `cattle-*`, `fleet-*`, `gke-*`, `gmp-*`, `usage-client`) aren't apps;
+  `APP_EVENTS=false` turns `app.deployed` off (big shared clusters).
+- **Tests:** `cd ../usage-client && mise run test` (unittest, plus a contract test of every event against
+  the pinned `api/openapi-<version>.yaml`), `mise run chart:check` (helm lint + render).
+
+### Installing on other clusters
+
+Any Kubernetes (k3s, rke2, kind, GKE, EKS, AKS, Rancher-managed): a Helm chart (`../usage-client/chart`),
+released with the image by `cd ../usage-client && mise run release` (version = the agent's `VERSION`):
+
+| what | where |
+|---|---|
+| image (amd64 + arm64) | `us-central1-docker.pkg.dev/scs-d-common-nonprod/docker-registry/tools/cluster/usage/client:<version>` |
+| chart | `oci://us-central1-docker.pkg.dev/scs-d-common-nonprod/docker-registry/tools/cluster/usage/charts/usage-client` |
+| git tag | `usage-client-v<version>` |
+
+```bash
+gcloud auth print-access-token | helm registry login -u oauth2accesstoken --password-stdin us-central1-docker.pkg.dev
+helm install usage-client oci://us-central1-docker.pkg.dev/scs-d-common-nonprod/docker-registry/tools/cluster/usage/charts/usage-client \
+  --version 0.4.0 -n usage-client --create-namespace \
+  --set cluster.type=durable --set cluster.role=stage --set cluster.username=<team>
+kubectl -n usage-client logs deploy/usage-client     # "sent N event(s)"
+```
+
+- **Values** (`chart/values.yaml`): `usageUrl` (default stage), `cluster.type` (`localdev`, `ephemeral`,
+  `durable`), `cluster.role` (`dev`, `test`, `stage`, `prod`, `perftest`), `cluster.username`,
+  `cluster.platform` (default detected), `appEvents`, `ignoreNamespaces`, `imagePullSecrets`, resources.
+- **No Helm on the cluster side:** `helm template usage-client oci://... --version 0.4.0 -n usage-client --set ... | kubectl apply -f -`
+  (create the namespace first). k3s and rke2 can also install it with their `HelmChart` resource
+  (`chart: oci://...`, `version`, `targetNamespace: usage-client`, `createNamespace: true`, `valuesContent`).
+- **Pod Security:** runs under `restricted` (non-root, seccomp RuntimeDefault, no capabilities, read-only root).
+- **Prerequisites:**
+  - The nodes can pull from the private registry: `roles/artifactregistry.reader` on the
+    `docker-registry` repo for the node service account (GKE), or an `imagePullSecrets` entry.
+  - The cluster can reach `usageUrl`. Stage is on the internal network only; elsewhere events
+    spool and expire after 72h. The ingest API has no authentication yet.
 
 ## Adding an event type
 

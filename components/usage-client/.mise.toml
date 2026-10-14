@@ -1,11 +1,21 @@
-# usage-client: stdlib-only Python pod (kube-system) that sends localdev events to a usage server.
-# A localdev component (manifests/, docker/); see ../usage-server/readme.md. The API it targets is a
-# frozen version from usage-server: ../usage-server/api/openapi-<version>.yaml (SPEC in tests/test_agent.py).
-#   mise run test    unit tests + contract test (events vs that API version)
-#   mise run image   build the image (IMAGE=usage-client:dev); in localdev: `mise run build usage-client`
+# usage-client: stdlib-only Python pod (namespace usage-client) that sends a cluster's usage events to a
+# usage server. A localdev component (manifests/, docker/) and, for any other cluster, a Helm chart (chart/);
+# see ../usage-server/readme.md. The API it targets is a frozen version from usage-server:
+# ../usage-server/api/openapi-<version>.yaml (SPEC in tests/test_agent.py).
+#   mise run test          unit tests + contract test (events vs that API version)
+#   mise run image         build the image (IMAGE=usage-client:dev); in localdev: `mise run build usage-client`
+#   mise run chart:check   helm lint + render, Chart.yaml versions == the agent's VERSION
+#   mise run release       push $CLIENT_REPO:<VERSION> (amd64 + arm64) and the chart to $CHART_REPO, tag git
+#                          usage-client-v<VERSION>. Needs: docker login / gcloud auth configure-docker for
+#                          us-central1-docker.pkg.dev, a clean tree, VERSION bumped in docker/agent.py + chart/Chart.yaml.
 
 [tools]
 uv = '0.12.24'
+helm = '3.17.4'
+
+[env]
+CLIENT_REPO = "us-central1-docker.pkg.dev/scs-d-common-nonprod/docker-registry/tools/cluster/usage/client"
+CHART_REPO = "oci://us-central1-docker.pkg.dev/scs-d-common-nonprod/docker-registry/tools/cluster/usage/charts"
 
 [tasks.test]
 description = "Run the client tests (stdlib unittest; jsonschema only for the contract test)"
@@ -16,3 +26,43 @@ run = "uv run --no-project --python 3.13 --with jsonschema==4.26.0 --with rfc333
 description = "Build the client image"
 dir = "{{config_root}}"
 run = 'docker build -t "${IMAGE:-usage-client:dev}" docker'
+
+[tasks."chart:check"]
+description = "Lint and render the Helm chart; its version/appVersion must equal the agent's VERSION"
+dir = "{{config_root}}"
+run = """#!/bin/bash
+set -euo pipefail
+ver="$(sed -n 's/^VERSION = "\\(.*\\)"$/\\1/p' docker/agent.py)"
+chart_ver="$(sed -n 's/^version: *//p' chart/Chart.yaml)"
+app_ver="$(sed -n 's/^appVersion: *"\\{0,1\\}\\([^"]*\\)"\\{0,1\\}$/\\1/p' chart/Chart.yaml)"
+[ "$chart_ver" = "$ver" ] && [ "$app_ver" = "$ver" ] || {
+    echo "chart/Chart.yaml version $chart_ver / appVersion $app_ver != agent VERSION $ver" >&2; exit 1; }
+helm lint chart
+helm template usage-client chart -n usage-client >/dev/null
+helm template usage-client chart -n usage-client --set cluster.type=durable --set cluster.role=stage \
+    --set appEvents=false --set 'imagePullSecrets[0].name=gar-pull' >/dev/null
+echo "chart ok: usage-client $ver"
+"""
+
+[tasks.release]
+description = "Push the client image (amd64 + arm64) and the Helm chart for VERSION, then tag git"
+dir = "{{config_root}}"
+run = """#!/bin/bash
+set -euo pipefail
+ver="$(sed -n 's/^VERSION = "\\(.*\\)"$/\\1/p' docker/agent.py)"
+image="$CLIENT_REPO:$ver"
+tag="usage-client-v$ver"
+if [ -n "$(git status --porcelain -- .)" ]; then echo "uncommitted changes under components/usage-client: commit first" >&2; exit 1; fi
+mise run chart:check
+if git rev-parse -q --verify "refs/tags/$tag" >/dev/null; then echo "git tag $tag exists: bump VERSION" >&2; exit 1; fi
+if docker manifest inspect "$image" >/dev/null 2>&1; then echo "$image already pushed: bump VERSION" >&2; exit 1; fi
+# multi-arch needs a docker-container builder (the default docker driver can't push a manifest list)
+docker buildx inspect usage-client >/dev/null 2>&1 || docker buildx create --name usage-client --driver docker-container >/dev/null
+docker buildx build --builder usage-client --platform linux/amd64,linux/arm64 --push -t "$image" docker
+out="$(mktemp -d)"; trap 'rm -rf "$out"' EXIT
+helm package chart --version "$ver" --app-version "$ver" -d "$out"
+gcloud auth print-access-token | helm registry login -u oauth2accesstoken --password-stdin "${CHART_REPO#oci://}"
+helm push "$out/usage-client-$ver.tgz" "$CHART_REPO"
+git tag -a "$tag" -m "usage client $ver ($image, chart $CHART_REPO/usage-client:$ver)"
+echo "pushed $image and chart $CHART_REPO/usage-client:$ver, tagged $tag (share it: git push origin $tag)"
+"""

@@ -1,0 +1,15 @@
+# the agent's environment (docker/agent.py); a change rolls the pod (checksum on the Deployment)
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "usage-client.name" . }}
+  labels: {{- include "usage-client.labels" . | nindent 4 }}
+data:
+  USAGE_URL: {{ required "usageUrl is required" .Values.usageUrl | quote }}
+  CLUSTER_TYPE: {{ .Values.cluster.type | quote }}
+  CLUSTER_ROLE: {{ .Values.cluster.role | quote }}
+  CLUSTER_USERNAME: {{ .Values.cluster.username | quote }}
+  CLUSTER_PLATFORM: {{ .Values.cluster.platform | quote }}
+  APP_EVENTS: {{ .Values.appEvents | toString | quote }}
+  IGNORE_NAMESPACES: {{ .Values.ignoreNamespaces | quote }}
+  LOG_LEVEL: {{ .Values.logLevel | quote }}

@@ -1,0 +1,30 @@
+# Install into its own namespace: helm install usage-client oci://.../charts/usage-client \
+#   --version <v> -n usage-client --create-namespace --set cluster.type=durable --set cluster.role=stage
+
+image:
+  repository: us-central1-docker.pkg.dev/scs-d-common-nonprod/docker-registry/tools/cluster/usage/client
+  tag: ""                       # default: the chart's appVersion
+  pullPolicy: IfNotPresent
+imagePullSecrets: []            # e.g. [{name: gar-pull}] where nodes can't pull from the registry
+
+# the usage server: events are POSTed to <usageUrl>/v1/events (best effort: spooled while unreachable)
+usageUrl: https://api.stage.ops.dematic.dev/usage
+
+# facts the API can't tell (the API's enums: type localdev|ephemeral|durable, role dev|test|stage|prod|perftest)
+cluster:
+  type: unknown
+  role: unknown
+  username: ""                  # who owns/runs the cluster (team or person)
+  platform: ""                  # default: detected (kind, gke, eks, aks, k3s, rke2, else kubernetes)
+
+appEvents: true                 # app.deployed per Deployment change; false on big shared clusters
+# namespaces that aren't apps (regex, whole name); empty: the agent's default
+# (kube-*, *-system, cattle-*, fleet-*, gke-*, gmp-*, usage-client)
+ignoreNamespaces: ""
+logLevel: info
+
+resources:
+  requests: {cpu: 5m, memory: 16Mi}
+  limits: {memory: 64Mi}
+nodeSelector: {}
+tolerations: []

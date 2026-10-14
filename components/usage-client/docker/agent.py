@@ -23,12 +23,18 @@ the server drops it when it already has them, and catches up when they changed w
 Environment (defaults): USAGE_URL (http://usage.usage.svc), POLL_S (30), FLUSH_S (30),
 HEARTBEAT_S (900), SPOOL_DIR (/spool), SPOOL_MAX_FILES (1000), SPOOL_MAX_AGE_S (259200),
 HTTP_TIMEOUT_S (5), LOG_LEVEL (info), CLUSTER_TYPE, CLUSTER_ROLE, CLUSTER_USERNAME (all: unknown),
-CLUSTER_PLATFORM (derived from the kubelet version).
+CLUSTER_PLATFORM (derived from the first node's providerID, else its kubelet version),
+APP_EVENTS (true; false: no app.deployed, e.g. on big shared clusters), IGNORE_NAMESPACES (a regex of
+namespaces that aren't apps, see IGNORE_NAMESPACES below; kube-*, *-system, cattle-*, gke-*, ...).
+
+Runs anywhere (localdev, k3s, rke2, kind, GKE, ...): localdev's manifests/ here, elsewhere the Helm chart
+in ../chart (released with the image: see usage-server's readme, "Installing on other clusters").
 """
 import hashlib
 import json
 import logging
 import os
+import re
 import signal
 import ssl
 import sys
@@ -42,7 +48,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 
-VERSION = "0.3.0"
+VERSION = "0.4.0"
 SOURCE = {"name": "localdev-cluster-agent", "version": VERSION}
 UNKNOWN = "unknown"                             # the API's value for a fact nobody reported (yet)
 # facts cluster.updated can carry (the envelope's username goes with them)
@@ -50,6 +56,10 @@ UPDATABLE = ("cluster_type", "cluster_role", "platform", "platform_version", "ku
              "os", "os_variant", "os_version")
 ADDON_LABEL = "objectset.rio.cattle.io/hash"   # k3s puts it on everything localdev's manifests create
 SYSTEM_NAMESPACES = {"kube-system", "kube-public", "kube-node-lease"}
+# namespaces of the platform, not apps, on clusters localdev didn't make (GKE, Rancher/rke2, operators)
+IGNORE_NAMESPACES = r"^(kube-.*|.*-system|cattle-.*|fleet-.*|gke-.*|gmp-.*|usage-client)$"
+# node spec.providerID prefix -> platform: the most reliable hint where there is one
+PROVIDERS = {"kind": "kind", "gce": "gke", "aws": "eks", "azure": "aks", "k3s": "k3s"}
 MAX_BATCH = 500                                 # the API's limit
 
 log = logging.getLogger("usage-client")
@@ -72,6 +82,9 @@ class Config:
     cluster_role: str = field(default_factory=lambda: os.environ.get("CLUSTER_ROLE", ""))
     cluster_username: str = field(default_factory=lambda: os.environ.get("CLUSTER_USERNAME", ""))
     cluster_platform: str = field(default_factory=lambda: os.environ.get("CLUSTER_PLATFORM", ""))
+    # app.deployed: off for big clusters; which namespaces aren't apps (a regex, full match)
+    app_events: bool = field(default_factory=lambda: os.environ.get("APP_EVENTS", "true").lower() not in ("false", "0", "no"))
+    ignore_namespaces: str = field(default_factory=lambda: os.environ.get("IGNORE_NAMESPACES") or IGNORE_NAMESPACES)
 
 
 class LogfmtFormatter(logging.Formatter):
@@ -143,8 +156,13 @@ def quantity_cores(q: str) -> float:
     return float(q[:-1]) / 1000 if q.endswith("m") else float(q)
 
 
-def platform_from(kubelet_version: str) -> str:
-    """Best guess at the distribution from the kubelet version (v1.36.5+k3s1, v1.35.2-eks-...)."""
+def platform_from(node: dict) -> str:
+    """Best guess at the distribution: the node's providerID (kind://, gce://, aws://, azure://), else the
+    kubelet version (v1.36.5+k3s1, v1.31.4+rke2r1, v1.35.2-eks-...), else plain kubernetes."""
+    provider = (node.get("spec") or {}).get("providerID", "").split("://", 1)[0]
+    if provider in PROVIDERS:
+        return PROVIDERS[provider]
+    kubelet_version = node.get("status", {}).get("nodeInfo", {}).get("kubeletVersion", "")
     for token in ("k3s", "rke2", "eks", "gke", "aks"):
         if token in kubelet_version:
             return token
@@ -230,10 +248,13 @@ def parse_profile(cm):
     return data.get("profile") or "unknown", components, cm["metadata"].get("resourceVersion", "")
 
 
-def user_namespaces(namespaces):
-    """Namespaces made by people (kubectl, helm, kn), not by localdev's manifests or k8s itself."""
+def user_namespaces(namespaces, ignore=IGNORE_NAMESPACES):
+    """Namespaces made by people (kubectl, helm, kn), not by localdev's manifests, k8s itself or the
+    platform (`ignore`: a regex matched against the whole name)."""
+    pattern = re.compile(ignore)
     return {ns["metadata"]["name"] for ns in namespaces.get("items", [])
             if ns["metadata"]["name"] not in SYSTEM_NAMESPACES
+            and not pattern.fullmatch(ns["metadata"]["name"])
             and ADDON_LABEL not in (ns["metadata"].get("labels") or {})}
 
 
@@ -422,9 +443,10 @@ class Agent:
         profile_cm = self.kube.get("/api/v1/namespaces/cnav/configmaps/localdev-profile")
         profile, components, rv = parse_profile(profile_cm) if profile_cm else (None, None, None)
 
-        node = (self.kube.get("/api/v1/nodes") or {}).get("items", [{}])[0]["status"]["nodeInfo"]
-        guessed_platform = not facts["platform"]          # from the kubelet version: a fallback guess
-        facts["platform"] = facts["platform"] or platform_from(node["kubeletVersion"])
+        first_node = (self.kube.get("/api/v1/nodes") or {}).get("items", [{}])[0]
+        node = first_node["status"]["nodeInfo"]
+        guessed_platform = not facts["platform"]          # from providerID/kubelet version: a fallback guess
+        facts["platform"] = facts["platform"] or platform_from(first_node)
         stated = stated_facts(facts, node)
         if not self.created_sent:
             self.emit(created_event(self.cluster_id, self.created_at, facts, profile, components, node))
@@ -458,10 +480,11 @@ class Agent:
                                         {"profile": profile, "components": ",".join(components)}))
             self.profile_seen = current
 
-        user_ns = user_namespaces(self.kube.get("/api/v1/namespaces") or {})
-        for ev in app_events(self.cluster_id, username, self.kube.get("/apis/apps/v1/deployments") or {},
-                             user_ns, self.apps_seen):
-            self.emit(ev)
+        if self.cfg.app_events:
+            user_ns = user_namespaces(self.kube.get("/api/v1/namespaces") or {}, self.cfg.ignore_namespaces)
+            for ev in app_events(self.cluster_id, username, self.kube.get("/apis/apps/v1/deployments") or {},
+                                 user_ns, self.apps_seen):
+                self.emit(ev)
 
         if self.clock() >= self.next_heartbeat:
             self.emit(heartbeat_event(self.cluster_id, username, cluster_stats(self.kube)))

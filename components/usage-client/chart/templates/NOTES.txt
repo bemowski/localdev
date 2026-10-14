@@ -1,0 +1,5 @@
+usage-client {{ .Chart.AppVersion }} sends this cluster's usage events to {{ .Values.usageUrl }}
+(type {{ .Values.cluster.type }}, role {{ .Values.cluster.role }}).
+
+Check it:  kubectl -n {{ .Release.Namespace }} logs deploy/{{ include "usage-client.name" . }}
+  "sent N event(s)" = delivered; "usage server ... unavailable" = spooling (kept up to 72h).

@@ -1,6 +1,6 @@
 # usage-client-local: a second usage-client that feeds THIS cluster's usage server (component
 # usage-server), for developing usage features: it comes and goes with the usage-server component.
-# The always-on usage-client (kube-system) keeps sending to the shared server; both are stateless and
+# The always-on usage-client (ns usage-client) keeps sending to the shared server; both are stateless and
 # derive event ids from the cluster id, so each server gets the same events and drops repeats itself.
 #   image: usage-client's (mise run build usage-client restarts both: label app=usage-client)
 #   USAGE_URL: the in-cluster address. Not http://api.localhost/usage: in a pod, *.localhost is the pod.
@@ -43,6 +43,11 @@ spec:
       serviceAccountName: usage-client-local
       enableServiceLinks: false
       terminationGracePeriodSeconds: 10      # SIGTERM: one last flush, then exit
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        seccompProfile: {type: RuntimeDefault}
       containers:
         - name: usage-client
           image: localdev-registry:5005/usage-client:latest
@@ -57,7 +62,7 @@ spec:
           securityContext:
             allowPrivilegeEscalation: false
             readOnlyRootFilesystem: true
-            runAsNonRoot: true
+            capabilities: {drop: [ALL]}
       volumes:
         - name: spool                          # ephemeral: losing events on a restart is fine
           emptyDir: {sizeLimit: 20Mi}

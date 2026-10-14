@@ -1,0 +1,51 @@
+# one pod, no state: events spool in an emptyDir (losing them on a restart is fine). Pod Security
+# "restricted" compatible (GKE Autopilot, hardened rke2).
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "usage-client.name" . }}
+  labels: {{- include "usage-client.labels" . | nindent 4 }}
+spec:
+  replicas: 1
+  strategy: {type: Recreate}
+  selector:
+    matchLabels: {{- include "usage-client.selector" . | nindent 6 }}
+  template:
+    metadata:
+      labels: {{- include "usage-client.selector" . | nindent 8 }}
+      annotations:
+        checksum/config: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
+    spec:
+      serviceAccountName: {{ include "usage-client.name" . }}
+      enableServiceLinks: false
+      terminationGracePeriodSeconds: 10      # SIGTERM: one last flush, then exit
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets: {{- toYaml . | nindent 8 }}
+      {{- end }}
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        seccompProfile: {type: RuntimeDefault}
+      containers:
+        - name: usage-client
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          envFrom:
+            - configMapRef: {name: {{ include "usage-client.name" . }}}
+          volumeMounts:
+            - {name: spool, mountPath: /spool}
+          resources: {{- toYaml .Values.resources | nindent 12 }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: {drop: [ALL]}
+      {{- with .Values.nodeSelector }}
+      nodeSelector: {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations: {{- toYaml . | nindent 8 }}
+      {{- end }}
+      volumes:
+        - name: spool
+          emptyDir: {sizeLimit: 20Mi}

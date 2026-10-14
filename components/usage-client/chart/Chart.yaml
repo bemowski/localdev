@@ -1,0 +1,9 @@
+# usage-client: sends this cluster's usage events (created, heartbeat, apps deployed) to a usage server.
+# Source: github bemowski/localdev, components/usage-client (agent: docker/agent.py). `mise run release`
+# there pushes the image and this chart with version = appVersion = the agent's VERSION.
+apiVersion: v2
+name: usage-client
+description: Sends this cluster's usage events (created, heartbeat, apps deployed) to a usage server
+type: application
+version: 0.4.0
+appVersion: "0.4.0"

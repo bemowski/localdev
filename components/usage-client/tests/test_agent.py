@@ -207,8 +207,51 @@ class QuantityTests(unittest.TestCase):
         self.assertEqual(agent.quantity_bytes("32486696Ki"), 32486696 * 1024)
         self.assertEqual(agent.quantity_bytes("16Gi"), 16 * 2**30)
         self.assertEqual(agent.quantity_bytes("1G"), 10**9)
-        self.assertEqual(agent.platform_from("v1.35.2-eks-a1b2c3"), "eks")
-        self.assertEqual(agent.platform_from("v1.36.0"), "kubernetes")
+
+
+class PlatformTests(unittest.TestCase):
+    @staticmethod
+    def node(kubelet, provider=None):
+        return {"spec": {"providerID": provider} if provider else {},
+                "status": {"nodeInfo": {"kubeletVersion": kubelet}}}
+
+    def test_provider_id_first(self):
+        self.assertEqual(agent.platform_from(self.node("v1.31.0", "kind://docker/kind/kind-control-plane")), "kind")
+        self.assertEqual(agent.platform_from(self.node("v1.33.5-gke.1080000", "gce://p/us-central1-a/n")), "gke")
+        self.assertEqual(agent.platform_from(self.node("v1.32.1", "aws:///us-east-1a/i-0abc")), "eks")
+        self.assertEqual(agent.platform_from(self.node("v1.32.1", "azure:///subscriptions/x")), "aks")
+
+    def test_kubelet_version_otherwise(self):
+        self.assertEqual(agent.platform_from(self.node("v1.31.4+rke2r1")), "rke2")
+        self.assertEqual(agent.platform_from(self.node("v1.36.5+k3s1", "k3s://k3d-localdev-server-0")), "k3s")
+        self.assertEqual(agent.platform_from(self.node("v1.35.2-eks-a1b2c3")), "eks")
+        self.assertEqual(agent.platform_from(self.node("v1.36.0", "openstack:///x")), "kubernetes")
+        self.assertEqual(agent.platform_from({}), "kubernetes")
+
+    def test_env_only_kind_cluster(self):
+        kube = FakeKube()
+        del kube.objects["/api/v1/namespaces/kube-system/configmaps/localdev-host"]
+        kube.objects["/api/v1/nodes"]["items"][0]["spec"] = {"providerID": "kind://docker/kind/kind-control-plane"}
+        a, spool, _ = make_agent(tempfile.mkdtemp(), kube)
+        a.poll()
+        self.assertEqual(spooled(spool)[0]["data"]["platform"], "kind")
+
+
+class NamespaceTests(unittest.TestCase):
+    def test_platform_namespaces_are_not_apps(self):
+        nss = {"items": [{"metadata": {"name": n}} for n in (
+            "default", "team-x", "kube-system", "kube-flannel", "cattle-system", "cattle-fleet-local-system",
+            "fleet-default", "gke-managed-system", "gmp-public", "gatekeeper-system", "usage-client", "usage")]}
+        self.assertEqual(agent.user_namespaces(nss), {"default", "team-x", "usage"})
+        self.assertEqual(agent.user_namespaces(nss, r"^(team-.*)$"),
+                         {"default", "kube-flannel", "cattle-system", "cattle-fleet-local-system", "fleet-default",
+                          "gke-managed-system", "gmp-public", "gatekeeper-system", "usage-client", "usage"})
+
+    def test_app_events_off(self):
+        a, spool, _ = make_agent(tempfile.mkdtemp())
+        a.cfg.app_events = False
+        a.poll()
+        self.assertEqual(names(spooled(spool)), ["cluster.created", "cluster.updated", "cluster.heartbeat"])
 
 
 class SpoolTests(unittest.TestCase):

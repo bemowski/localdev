@@ -5,13 +5,20 @@
 # and the agent logs one warning. Developing the usage server itself? The usage-server component adds a
 # second client, usage-client-local, that feeds the local server (its manifests/50-3-usage-client-local.yaml).
 #   build: mise run build usage-client      code: docker/agent.py
+#   other clusters: the Helm chart in ../chart (same objects; released with the image, see
+#   ../usage-server/readme.md "Installing on other clusters")
 #   optional: ConfigMap kube-system/localdev-host (host facts, written by localdev's tasks). Without it
 #   the facts are "unknown"; cluster.updated backfills them when it appears.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: usage-client
+---
 apiVersion: v1
 kind: ServiceAccount
 metadata:
   name: usage-client
-  namespace: kube-system
+  namespace: usage-client
 ---
 # read-only: cluster identity, nodes, pod/namespace counts, the two localdev ConfigMaps, Deployments
 apiVersion: rbac.authorization.k8s.io/v1
@@ -39,13 +46,13 @@ metadata:
   name: usage-client
 roleRef: {apiGroup: rbac.authorization.k8s.io, kind: ClusterRole, name: usage-client}
 subjects:
-  - {kind: ServiceAccount, name: usage-client, namespace: kube-system}
+  - {kind: ServiceAccount, name: usage-client, namespace: usage-client}
 ---
 apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: usage-client
-  namespace: kube-system
+  namespace: usage-client
   # localdev/component + status-group: a row in cnav's infra group
   labels: {app: usage-client, localdev/component: usage-client, localdev/status-group: infra}
 spec:
@@ -60,6 +67,11 @@ spec:
       serviceAccountName: usage-client
       enableServiceLinks: false
       terminationGracePeriodSeconds: 10      # SIGTERM: one last flush, then exit
+      securityContext:                       # Pod Security "restricted", as the chart
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        seccompProfile: {type: RuntimeDefault}
       containers:
         - name: usage-client
           image: localdev-registry:5005/usage-client:latest
@@ -75,7 +87,7 @@ spec:
           securityContext:
             allowPrivilegeEscalation: false
             readOnlyRootFilesystem: true
-            runAsNonRoot: true
+            capabilities: {drop: [ALL]}
       volumes:
         - name: spool                          # ephemeral: losing events on a restart is fine
           emptyDir: {sizeLimit: 20Mi}

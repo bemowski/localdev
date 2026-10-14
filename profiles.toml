@@ -34,7 +34,7 @@ layer = "infra"                # deploy with infra, before the tools
 always = true
 
 [components.usage-client]
-layer = "infra"                # kube-system; sends this cluster's usage events (API: usage-server)
+layer = "infra"                # ns usage-client; sends this cluster's usage events (API: usage-server)
 always = true                  # every profile, with or without a usage server (it spools)
 
 [components.api-auth]
